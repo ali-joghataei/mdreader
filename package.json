@@ -5,6 +5,14 @@
   "description": "Cross-platform Markdown reader and editor built with Electron.",
   "main": "dist-electron/main.js",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ali-joghataei/mdreader.git"
+  },
+  "homepage": "https://github.com/ali-joghataei/mdreader",
+  "bugs": {
+    "url": "https://github.com/ali-joghataei/mdreader/issues"
+  },
   "scripts": {
     "start": "npm run dev",
     "dev": "concurrently -k \"vite --config vite.renderer.config.ts --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 node scripts/start-electron.cjs\"",
@@ -24,6 +32,13 @@
     "appId": "com.alijoghataei.mdreader",
     "productName": "MdReader",
     "asar": true,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ali-joghataei",
+        "repo": "mdreader"
+      }
+    ],
     "directories": {
       "output": "dist"
     },
