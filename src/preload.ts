@@ -34,6 +34,11 @@ type ExplorerDirectory = {
   }>;
 };
 
+type ExternalFileChangedEvent = {
+  filePath: string;
+  isDirty: boolean;
+};
+
 const api = {
   openMarkdownDialog: () =>
     ipcRenderer.invoke('dialog:openMarkdown') as Promise<MarkdownDocument | null>,
@@ -82,6 +87,17 @@ const api = {
       callback(command);
     ipcRenderer.on('menu-command', listener);
     return () => ipcRenderer.off('menu-command', listener);
+  },
+  onExternalFileChanged: (callback: (event: ExternalFileChangedEvent) => void) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      payload: ExternalFileChangedEvent,
+    ) => callback(payload);
+    ipcRenderer.on('external-file-changed', listener);
+    return () => ipcRenderer.off('external-file-changed', listener);
+  },
+  acknowledgeExternalFileChange: (action: 'reload' | 'keep') => {
+    ipcRenderer.send('external-file-change-handled', action);
   },
 };
 

@@ -203,6 +203,18 @@ app.innerHTML = `
       </section>
       <div class="drop-overlay" id="dropOverlay">Drop Markdown file to open</div>
     </main>
+    <div class="settings-modal external-change-modal" id="externalChangeModal" hidden>
+      <div class="settings-dialog" role="alertdialog" aria-modal="true" aria-labelledby="externalChangeTitle" aria-describedby="externalChangeMessage">
+        <div class="settings-header">
+          <h2 id="externalChangeTitle">File changed on disk</h2>
+        </div>
+        <p class="dialog-message" id="externalChangeMessage"></p>
+        <div class="settings-actions">
+          <button class="icon-button" id="keepExternalChangeButton" type="button">Keep Editing</button>
+          <button class="icon-button primary-button" id="reloadExternalChangeButton" type="button">Reload</button>
+        </div>
+      </div>
+    </div>
     <div class="settings-modal" id="settingsModal" hidden>
       <div class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
         <div class="settings-header">
@@ -289,6 +301,13 @@ const saveButton = document.querySelector<HTMLButtonElement>('#saveButton');
 const saveAsButton = document.querySelector<HTMLButtonElement>('#saveAsButton');
 const settingsButton = document.querySelector<HTMLButtonElement>('#settingsButton');
 const dropOverlay = document.querySelector<HTMLDivElement>('#dropOverlay');
+const externalChangeModal = document.querySelector<HTMLDivElement>('#externalChangeModal');
+const externalChangeMessage =
+  document.querySelector<HTMLParagraphElement>('#externalChangeMessage');
+const keepExternalChangeButton =
+  document.querySelector<HTMLButtonElement>('#keepExternalChangeButton');
+const reloadExternalChangeButton =
+  document.querySelector<HTMLButtonElement>('#reloadExternalChangeButton');
 const settingsModal = document.querySelector<HTMLDivElement>('#settingsModal');
 const closeSettingsButton =
   document.querySelector<HTMLButtonElement>('#closeSettingsButton');
@@ -335,6 +354,10 @@ if (
   !saveAsButton ||
   !settingsButton ||
   !dropOverlay ||
+  !externalChangeModal ||
+  !externalChangeMessage ||
+  !keepExternalChangeButton ||
+  !reloadExternalChangeButton ||
   !settingsModal ||
   !closeSettingsButton ||
   !fontSelect ||
@@ -964,6 +987,50 @@ const saveAs = async () => {
   }
 };
 
+const closeExternalChangeModal = () => {
+  externalChangeModal.hidden = true;
+};
+
+const openExternalChangeModal = (filePath: string, hasUnsavedChanges: boolean) => {
+  const fileName = getBaseName(filePath);
+  externalChangeMessage.textContent = hasUnsavedChanges
+    ? `${fileName} was modified outside MdReader. Reloading will replace the file in MdReader and discard your unsaved changes. Do you want to reload from disk?`
+    : `${fileName} was modified outside MdReader. Do you want to reload the file from disk?`;
+  externalChangeModal.hidden = false;
+  keepExternalChangeButton.focus();
+};
+
+const keepExternalDocument = () => {
+  closeExternalChangeModal();
+  window.mdReader.acknowledgeExternalFileChange('keep');
+};
+
+const reloadExternalDocument = async () => {
+  if (!currentFilePath) {
+    keepExternalDocument();
+    return;
+  }
+
+  closeExternalChangeModal();
+  window.mdReader.acknowledgeExternalFileChange('reload');
+
+  const document = await window.mdReader.readMarkdownFile(currentFilePath);
+  openDocument(document);
+};
+
+const handleExternalFileChanged = ({
+  filePath,
+}: {
+  filePath: string;
+  isDirty: boolean;
+}) => {
+  if (!currentFilePath || filePath !== currentFilePath || !externalChangeModal.hidden) {
+    return;
+  }
+
+  openExternalChangeModal(filePath, isDirty());
+};
+
 const loadFonts = async () => {
   if (fontsLoaded) {
     return;
@@ -1189,6 +1256,12 @@ settingsModal.addEventListener('click', (event) => {
   }
 });
 
+keepExternalChangeButton.addEventListener('click', keepExternalDocument);
+
+reloadExternalChangeButton.addEventListener('click', () => {
+  void reloadExternalDocument().catch(showOpenError);
+});
+
 previewSearchInput.addEventListener('input', updatePreviewSearch);
 
 previewSearchInput.addEventListener('keydown', (event) => {
@@ -1273,7 +1346,7 @@ previewPane.addEventListener('focusin', () => {
 
 window.addEventListener('keydown', (event) => {
   if ((event.ctrlKey || event.metaKey) && event.code === 'KeyF') {
-    if (!settingsModal.hidden) {
+    if (!settingsModal.hidden || !externalChangeModal.hidden) {
       return;
     }
 
@@ -1288,6 +1361,12 @@ window.addEventListener('keydown', (event) => {
 
   if (event.key === 'Escape' && !settingsModal.hidden) {
     closeSettings();
+    return;
+  }
+
+  if (event.key === 'Escape' && !externalChangeModal.hidden) {
+    event.preventDefault();
+    keepExternalDocument();
     return;
   }
 
@@ -1408,6 +1487,7 @@ window.addEventListener('drop', (event) => {
 });
 
 window.mdReader.onOpenDocument(openDocument);
+window.mdReader.onExternalFileChanged(handleExternalFileChanged);
 window.mdReader.onMenuCommand((command: MenuCommand) => {
   if (command === 'open') {
     void openFromDialog().catch(showOpenError);

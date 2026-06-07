@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
 import { execFile } from 'node:child_process';
+import { watch, type FSWatcher } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,6 +37,11 @@ let documentState: DocumentState = {
   filePath: null,
   isDirty: false,
 };
+let fileWatcher: FSWatcher | null = null;
+let watchedFilePath: string | null = null;
+let externalChangePending = false;
+let suppressWatchUntil = 0;
+let watchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let settingsCache: AppSettings | null = null;
 const execFileAsync = promisify(execFile);
 
@@ -276,6 +282,91 @@ const listExplorerDirectory = async (directoryPath: string) => {
   };
 };
 
+const suppressFileWatch = (durationMs = 750) => {
+  suppressWatchUntil = Date.now() + durationMs;
+};
+
+const stopFileWatcher = () => {
+  if (watchDebounceTimer) {
+    clearTimeout(watchDebounceTimer);
+    watchDebounceTimer = null;
+  }
+
+  fileWatcher?.close();
+  fileWatcher = null;
+  watchedFilePath = null;
+  externalChangePending = false;
+};
+
+const notifyExternalFileChanged = () => {
+  if (!mainWindow || !documentState.filePath) {
+    return;
+  }
+
+  mainWindow.webContents.send('external-file-changed', {
+    filePath: documentState.filePath,
+    isDirty: documentState.isDirty,
+  });
+  externalChangePending = false;
+};
+
+const markExternalFileChanged = () => {
+  if (!documentState.filePath) {
+    return;
+  }
+
+  externalChangePending = true;
+
+  if (mainWindow?.isFocused()) {
+    notifyExternalFileChanged();
+  }
+};
+
+const startFileWatcher = (filePath: string | null) => {
+  if (filePath === watchedFilePath) {
+    return;
+  }
+
+  stopFileWatcher();
+
+  if (!filePath) {
+    return;
+  }
+
+  watchedFilePath = filePath;
+
+  try {
+    fileWatcher = watch(filePath, { persistent: false }, (eventType) => {
+      if (eventType !== 'change') {
+        return;
+      }
+
+      if (Date.now() < suppressWatchUntil) {
+        return;
+      }
+
+      if (watchDebounceTimer) {
+        clearTimeout(watchDebounceTimer);
+      }
+
+      watchDebounceTimer = setTimeout(() => {
+        watchDebounceTimer = null;
+        markExternalFileChanged();
+      }, 200);
+    });
+  } catch {
+    stopFileWatcher();
+  }
+};
+
+const promptExternalFileChangeOnFocus = () => {
+  if (!externalChangePending) {
+    return;
+  }
+
+  notifyExternalFileChanged();
+};
+
 const updateWindowTitle = () => {
   if (!mainWindow) {
     return;
@@ -380,6 +471,8 @@ const createWindow = (initialFilePath: string | null) => {
     mainWindow.loadFile(path.join(__dirname, '../dist-renderer/index.html'));
   }
 
+  mainWindow.on('focus', promptExternalFileChangeOnFocus);
+
   mainWindow.webContents.once('did-finish-load', async () => {
     if (!initialFilePath) {
       updateWindowTitle();
@@ -393,6 +486,7 @@ const createWindow = (initialFilePath: string | null) => {
         filePath: document.filePath,
         isDirty: false,
       };
+      startFileWatcher(document.filePath);
       updateWindowTitle();
     } catch (error) {
       dialog.showErrorBox(
@@ -462,6 +556,7 @@ ipcMain.handle(
 ipcMain.handle(
   'file:saveMarkdown',
   async (_event, filePath: string, content: string) => {
+    suppressFileWatch();
     await fs.writeFile(filePath, content, 'utf8');
     return {
       filePath,
@@ -492,6 +587,7 @@ ipcMain.handle(
       return null;
     }
 
+    suppressFileWatch();
     await fs.writeFile(result.filePath, content, 'utf8');
     return {
       filePath: result.filePath,
@@ -499,6 +595,14 @@ ipcMain.handle(
     };
   },
 );
+
+ipcMain.on('external-file-change-handled', (_event, action: 'reload' | 'keep') => {
+  externalChangePending = false;
+
+  if (action === 'keep') {
+    suppressFileWatch();
+  }
+});
 
 ipcMain.handle('settings:get', () => readSettings());
 
@@ -519,6 +623,10 @@ ipcMain.handle('path:dirname', (_event, filePath: string) => path.dirname(filePa
 ipcMain.on('document-state-changed', (_event, state: DocumentState) => {
   documentState = state;
   updateWindowTitle();
+
+  if (state.filePath !== watchedFilePath) {
+    startFileWatcher(state.filePath);
+  }
 });
 
 app.whenReady().then(() => {

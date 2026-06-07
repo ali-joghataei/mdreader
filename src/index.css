@@ -715,6 +715,16 @@ button {
   display: none;
 }
 
+.external-change-modal {
+  z-index: 25;
+}
+
+.dialog-message {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.6;
+}
+
 .settings-dialog {
   display: grid;
   gap: 18px;
