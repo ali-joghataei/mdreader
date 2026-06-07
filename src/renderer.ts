@@ -5,7 +5,7 @@ import 'katex/dist/katex.min.css';
 import { EditorView, basicSetup } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { Compartment, EditorState } from '@codemirror/state';
-import { PanelLeft, createIcons } from 'lucide';
+import { ArrowUp, FileText, Folder, PanelLeft, createIcons } from 'lucide';
 import DOMPurify from 'dompurify';
 import hljs from 'highlight.js';
 import MarkdownIt from 'markdown-it';
@@ -224,11 +224,14 @@ app.innerHTML = `
   </div>
 `;
 
-createIcons({
-  icons: {
-    PanelLeft,
-  },
-});
+const lucideIcons = {
+  ArrowUp,
+  FileText,
+  Folder,
+  PanelLeft,
+};
+
+createIcons({ icons: lucideIcons });
 
 const fileNameElement = document.querySelector<HTMLDivElement>('#fileName');
 const filePathElement = document.querySelector<HTMLDivElement>('#filePath');
@@ -687,6 +690,22 @@ const saveSettings = async () => {
   closeSettings();
 };
 
+const appendFileTreeItemContent = (
+  button: HTMLButtonElement,
+  iconName: 'arrow-up' | 'file-text' | 'folder',
+  name: string,
+) => {
+  const icon = document.createElement('i');
+  icon.className = 'file-tree-icon';
+  icon.dataset.lucide = iconName;
+
+  const label = document.createElement('span');
+  label.className = 'file-tree-label';
+  label.textContent = name;
+
+  button.append(icon, label);
+};
+
 const renderFileTree = (directory: ExplorerDirectory) => {
   explorerDirectoryPath = directory.currentPath;
   sidebarPath.textContent = directory.currentPath;
@@ -694,9 +713,9 @@ const renderFileTree = (directory: ExplorerDirectory) => {
 
   if (directory.parentPath) {
     const parentButton = document.createElement('button');
-    parentButton.className = 'file-tree-item directory-item';
+    parentButton.className = 'file-tree-item parent-item';
     parentButton.type = 'button';
-    parentButton.textContent = '..';
+    appendFileTreeItemContent(parentButton, 'arrow-up', '..');
     parentButton.addEventListener('click', () => {
       void loadExplorerDirectory(directory.parentPath).catch(showOpenError);
     });
@@ -707,7 +726,11 @@ const renderFileTree = (directory: ExplorerDirectory) => {
     const button = document.createElement('button');
     button.className = `file-tree-item ${entry.type}-item`;
     button.type = 'button';
-    button.textContent = entry.name;
+    appendFileTreeItemContent(
+      button,
+      entry.type === 'directory' ? 'folder' : 'file-text',
+      entry.name,
+    );
     button.title = entry.filePath;
     button.classList.toggle('active', entry.filePath === currentFilePath);
     button.addEventListener('click', () => {
@@ -720,6 +743,8 @@ const renderFileTree = (directory: ExplorerDirectory) => {
     });
     fileTree.append(button);
   });
+
+  createIcons({ icons: lucideIcons });
 };
 
 const loadExplorerDirectory = async (directoryPath: string | null) => {
