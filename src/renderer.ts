@@ -37,6 +37,7 @@ type MenuCommand = 'open' | 'save' | 'save-as' | 'settings';
 
 type AppSettings = {
   fontFamily: string | null;
+  customizeEditorFont: boolean;
   useEditorFont: boolean;
   editorFontFamily: string | null;
   themeMode: 'auto' | 'light' | 'dark';
@@ -189,6 +190,10 @@ app.innerHTML = `
           </select>
         </label>
         <label class="settings-check">
+          <input type="checkbox" id="customizeEditorFontCheckbox" />
+          <span>Customize editor font</span>
+        </label>
+        <label class="settings-check">
           <input type="checkbox" id="useEditorFontCheckbox" />
           <span>Use a separate editor font</span>
         </label>
@@ -246,6 +251,8 @@ const settingsModal = document.querySelector<HTMLDivElement>('#settingsModal');
 const closeSettingsButton =
   document.querySelector<HTMLButtonElement>('#closeSettingsButton');
 const fontSelect = document.querySelector<HTMLSelectElement>('#fontSelect');
+const customizeEditorFontCheckbox =
+  document.querySelector<HTMLInputElement>('#customizeEditorFontCheckbox');
 const useEditorFontCheckbox =
   document.querySelector<HTMLInputElement>('#useEditorFontCheckbox');
 const editorFontSelect = document.querySelector<HTMLSelectElement>('#editorFontSelect');
@@ -281,6 +288,7 @@ if (
   !settingsModal ||
   !closeSettingsButton ||
   !fontSelect ||
+  !customizeEditorFontCheckbox ||
   !useEditorFontCheckbox ||
   !editorFontSelect ||
   !themeSelect ||
@@ -299,6 +307,7 @@ let mode: ViewMode = 'preview';
 let isApplyingDocument = false;
 let appSettings: AppSettings = {
   fontFamily: null,
+  customizeEditorFont: false,
   useEditorFont: false,
   editorFontFamily: null,
   themeMode: 'auto',
@@ -359,6 +368,7 @@ const getEffectiveTheme = (themeMode: AppSettings['themeMode']) => {
 const applySettings = (settings: AppSettings) => {
   appSettings = {
     fontFamily: settings.fontFamily?.trim() || null,
+    customizeEditorFont: settings.customizeEditorFont === true,
     useEditorFont: settings.useEditorFont === true,
     editorFontFamily: settings.editorFontFamily?.trim() || null,
     themeMode:
@@ -378,11 +388,16 @@ const applySettings = (settings: AppSettings) => {
     '--editor-font-family',
     editorFontFamily,
   );
+  document.documentElement.dataset.editorFontEnabled = String(
+    appSettings.customizeEditorFont,
+  );
   document.documentElement.dataset.theme = getEffectiveTheme(appSettings.themeMode);
   fontSelect.value = appSettings.fontFamily ?? '';
   editorFontSelect.value = appSettings.editorFontFamily ?? '';
+  customizeEditorFontCheckbox.checked = appSettings.customizeEditorFont;
   useEditorFontCheckbox.checked = appSettings.useEditorFont;
-  editorFontSelect.disabled = !appSettings.useEditorFont;
+  useEditorFontCheckbox.disabled = !appSettings.customizeEditorFont;
+  editorFontSelect.disabled = !appSettings.customizeEditorFont || !appSettings.useEditorFont;
   themeSelect.value = appSettings.themeMode;
   settingsPreview.style.fontFamily = readerFontFamily;
 };
@@ -646,8 +661,10 @@ const openSettings = async () => {
   await loadFonts();
   fontSelect.value = appSettings.fontFamily ?? '';
   editorFontSelect.value = appSettings.editorFontFamily ?? '';
+  customizeEditorFontCheckbox.checked = appSettings.customizeEditorFont;
   useEditorFontCheckbox.checked = appSettings.useEditorFont;
-  editorFontSelect.disabled = !appSettings.useEditorFont;
+  useEditorFontCheckbox.disabled = !appSettings.customizeEditorFont;
+  editorFontSelect.disabled = !appSettings.customizeEditorFont || !appSettings.useEditorFont;
   themeSelect.value = appSettings.themeMode;
   settingsPreview.style.fontFamily = toCssFontFamily(fontSelect.value || null);
   settingsModal.hidden = false;
@@ -661,6 +678,7 @@ const closeSettings = () => {
 const saveSettings = async () => {
   const settings = await window.mdReader.saveSettings({
     fontFamily: fontSelect.value || null,
+    customizeEditorFont: customizeEditorFontCheckbox.checked,
     useEditorFont: useEditorFontCheckbox.checked,
     editorFontFamily: editorFontSelect.value || null,
     themeMode: themeSelect.value as AppSettings['themeMode'],
@@ -789,13 +807,22 @@ fontSelect.addEventListener('change', () => {
   settingsPreview.style.fontFamily = toCssFontFamily(fontSelect.value || null);
 });
 
+customizeEditorFontCheckbox.addEventListener('change', () => {
+  useEditorFontCheckbox.disabled = !customizeEditorFontCheckbox.checked;
+  editorFontSelect.disabled =
+    !customizeEditorFontCheckbox.checked || !useEditorFontCheckbox.checked;
+});
+
 useEditorFontCheckbox.addEventListener('change', () => {
-  editorFontSelect.disabled = !useEditorFontCheckbox.checked;
+  editorFontSelect.disabled =
+    !customizeEditorFontCheckbox.checked || !useEditorFontCheckbox.checked;
 });
 
 resetFontButton.addEventListener('click', () => {
   fontSelect.value = '';
+  customizeEditorFontCheckbox.checked = false;
   useEditorFontCheckbox.checked = false;
+  useEditorFontCheckbox.disabled = true;
   editorFontSelect.value = '';
   editorFontSelect.disabled = true;
   settingsPreview.style.fontFamily = toCssFontFamily(null);

@@ -18,6 +18,7 @@ type DocumentState = {
 
 type AppSettings = {
   fontFamily: string | null;
+  customizeEditorFont: boolean;
   useEditorFont: boolean;
   editorFontFamily: string | null;
   themeMode: 'auto' | 'light' | 'dark';

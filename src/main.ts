@@ -12,6 +12,7 @@ type DocumentState = {
 
 type AppSettings = {
   fontFamily: string | null;
+  customizeEditorFont: boolean;
   useEditorFont: boolean;
   editorFontFamily: string | null;
   themeMode: 'auto' | 'light' | 'dark';
@@ -111,6 +112,7 @@ const readSettings = async (): Promise<AppSettings> => {
         typeof parsed.fontFamily === 'string' && parsed.fontFamily.trim()
           ? parsed.fontFamily
           : null,
+      customizeEditorFont: parsed.customizeEditorFont === true,
       useEditorFont: parsed.useEditorFont === true,
       editorFontFamily:
         typeof parsed.editorFontFamily === 'string' && parsed.editorFontFamily.trim()
@@ -124,6 +126,7 @@ const readSettings = async (): Promise<AppSettings> => {
   } catch {
     settingsCache = {
       fontFamily: null,
+      customizeEditorFont: false,
       useEditorFont: false,
       editorFontFamily: null,
       themeMode: 'auto',
@@ -136,6 +139,7 @@ const readSettings = async (): Promise<AppSettings> => {
 const writeSettings = async (settings: AppSettings) => {
   settingsCache = {
     fontFamily: settings.fontFamily?.trim() || null,
+    customizeEditorFont: settings.customizeEditorFont === true,
     useEditorFont: settings.useEditorFont === true,
     editorFontFamily: settings.editorFontFamily?.trim() || null,
     themeMode:

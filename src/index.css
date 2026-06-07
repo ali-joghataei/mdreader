@@ -373,7 +373,7 @@ button {
   font-size: 14px;
 }
 
-.cm-scroller {
+:root[data-editor-font-enabled="true"] #editor .cm-scroller {
   font-family: var(--editor-font-family);
 }
 
