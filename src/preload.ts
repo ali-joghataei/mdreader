@@ -18,6 +18,19 @@ type DocumentState = {
 
 type AppSettings = {
   fontFamily: string | null;
+  useEditorFont: boolean;
+  editorFontFamily: string | null;
+  themeMode: 'auto' | 'light' | 'dark';
+};
+
+type ExplorerDirectory = {
+  currentPath: string;
+  parentPath: string | null;
+  entries: Array<{
+    name: string;
+    filePath: string;
+    type: 'directory' | 'markdown';
+  }>;
 };
 
 const api = {
@@ -50,6 +63,12 @@ const api = {
   saveSettings: (settings: AppSettings) =>
     ipcRenderer.invoke('settings:save', settings) as Promise<AppSettings>,
   listSystemFonts: () => ipcRenderer.invoke('fonts:list') as Promise<string[]>,
+  listExplorerDirectory: (directoryPath: string) =>
+    ipcRenderer.invoke(
+      'explorer:listDirectory',
+      directoryPath,
+    ) as Promise<ExplorerDirectory>,
+  dirname: (filePath: string) => ipcRenderer.invoke('path:dirname', filePath) as Promise<string>,
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   onOpenDocument: (callback: (document: MarkdownDocument) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, document: MarkdownDocument) =>

@@ -12,12 +12,21 @@ type DocumentState = {
 
 type AppSettings = {
   fontFamily: string | null;
+  useEditorFont: boolean;
+  editorFontFamily: string | null;
+  themeMode: 'auto' | 'light' | 'dark';
 };
 
 type LinkedMarkdownDocument = {
   filePath: string;
   content: string;
   hash: string | null;
+};
+
+type ExplorerEntry = {
+  name: string;
+  filePath: string;
+  type: 'directory' | 'markdown';
 };
 
 const markdownExtensions = new Set(['.md', '.markdown', '.mdown', '.mkd']);
@@ -102,10 +111,22 @@ const readSettings = async (): Promise<AppSettings> => {
         typeof parsed.fontFamily === 'string' && parsed.fontFamily.trim()
           ? parsed.fontFamily
           : null,
+      useEditorFont: parsed.useEditorFont === true,
+      editorFontFamily:
+        typeof parsed.editorFontFamily === 'string' && parsed.editorFontFamily.trim()
+          ? parsed.editorFontFamily
+          : null,
+      themeMode:
+        parsed.themeMode === 'light' || parsed.themeMode === 'dark'
+          ? parsed.themeMode
+          : 'auto',
     };
   } catch {
     settingsCache = {
       fontFamily: null,
+      useEditorFont: false,
+      editorFontFamily: null,
+      themeMode: 'auto',
     };
   }
 
@@ -115,6 +136,12 @@ const readSettings = async (): Promise<AppSettings> => {
 const writeSettings = async (settings: AppSettings) => {
   settingsCache = {
     fontFamily: settings.fontFamily?.trim() || null,
+    useEditorFont: settings.useEditorFont === true,
+    editorFontFamily: settings.editorFontFamily?.trim() || null,
+    themeMode:
+      settings.themeMode === 'light' || settings.themeMode === 'dark'
+        ? settings.themeMode
+        : 'auto',
   };
   await fs.mkdir(path.dirname(getSettingsPath()), { recursive: true });
   await fs.writeFile(
@@ -217,6 +244,32 @@ const listSystemFonts = async () => {
   }
 
   return [];
+};
+
+const listExplorerDirectory = async (directoryPath: string) => {
+  const resolvedPath = path.resolve(directoryPath);
+  const entries = await fs.readdir(resolvedPath, { withFileTypes: true });
+  const filteredEntries: ExplorerEntry[] = entries
+    .filter((entry) => entry.isDirectory() || isMarkdownFile(entry.name))
+    .map((entry) => ({
+      name: entry.name,
+      filePath: path.join(resolvedPath, entry.name),
+      type: entry.isDirectory() ? 'directory' : 'markdown',
+    }));
+
+  filteredEntries.sort((first, second) => {
+    if (first.type !== second.type) {
+      return first.type === 'directory' ? -1 : 1;
+    }
+
+    return first.name.localeCompare(second.name);
+  });
+
+  return {
+    currentPath: resolvedPath,
+    parentPath: path.dirname(resolvedPath) === resolvedPath ? null : path.dirname(resolvedPath),
+    entries: filteredEntries,
+  };
 };
 
 const updateWindowTitle = () => {
@@ -452,6 +505,12 @@ ipcMain.handle('settings:save', (_event, settings: AppSettings) =>
 ipcMain.handle('fonts:list', async () => {
   return listSystemFonts();
 });
+
+ipcMain.handle('explorer:listDirectory', async (_event, directoryPath: string) =>
+  listExplorerDirectory(directoryPath),
+);
+
+ipcMain.handle('path:dirname', (_event, filePath: string) => path.dirname(filePath));
 
 ipcMain.on('document-state-changed', (_event, state: DocumentState) => {
   documentState = state;

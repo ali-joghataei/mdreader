@@ -1,7 +1,7 @@
 {
   "name": "mdreader",
   "productName": "MdReader",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Cross-platform Markdown reader and editor built with Electron.",
   "main": "dist-electron/main.js",
   "private": true,
@@ -105,6 +105,7 @@
     "electron-updater": "^6.8.3",
     "highlight.js": "^11.11.1",
     "katex": "^0.16.47",
+    "lucide": "^1.17.0",
     "markdown-it": "^14.1.1",
     "markdown-it-abbr": "^2.0.0",
     "markdown-it-anchor": "^9.2.0",

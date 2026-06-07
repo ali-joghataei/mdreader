@@ -5,6 +5,7 @@ import 'katex/dist/katex.min.css';
 import { EditorView, basicSetup } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { Compartment, EditorState } from '@codemirror/state';
+import { PanelLeft, createIcons } from 'lucide';
 import DOMPurify from 'dompurify';
 import hljs from 'highlight.js';
 import MarkdownIt from 'markdown-it';
@@ -36,6 +37,19 @@ type MenuCommand = 'open' | 'save' | 'save-as' | 'settings';
 
 type AppSettings = {
   fontFamily: string | null;
+  useEditorFont: boolean;
+  editorFontFamily: string | null;
+  themeMode: 'auto' | 'light' | 'dark';
+};
+
+type ExplorerDirectory = {
+  currentPath: string;
+  parentPath: string | null;
+  entries: Array<{
+    name: string;
+    filePath: string;
+    type: 'directory' | 'markdown';
+  }>;
 };
 
 const defaultFontStack =
@@ -112,6 +126,7 @@ if (!app) {
 app.innerHTML = `
   <div class="app-shell">
     <header class="toolbar">
+      <button class="icon-button sidebar-toggle icon-only-button" id="sidebarToggleButton" title="Toggle file explorer" aria-label="Toggle file explorer" aria-expanded="false"><i data-lucide="panel-left"></i></button>
       <div class="document-meta">
         <div class="file-name" id="fileName">Untitled</div>
         <div class="file-path" id="filePath">Open or drop a Markdown file</div>
@@ -129,12 +144,35 @@ app.innerHTML = `
         <button class="mode-button" data-mode="split" role="tab" aria-selected="false">Split</button>
       </div>
     </header>
-    <main class="workspace preview-mode" id="workspace">
-      <section class="pane editor-pane" aria-label="Markdown editor">
-        <div id="editor"></div>
-      </section>
-      <section class="pane preview-pane" aria-label="Markdown preview">
-        <article class="markdown-body" id="preview"></article>
+    <main class="content-shell">
+      <aside class="file-sidebar" id="fileSidebar" aria-label="File explorer">
+        <div class="sidebar-header">
+          <div>
+            <div class="sidebar-title">Explorer</div>
+            <div class="sidebar-path" id="sidebarPath">No file open</div>
+          </div>
+        </div>
+        <div class="file-tree" id="fileTree"></div>
+      </aside>
+      <section class="workspace preview-mode" id="workspace">
+        <section class="pane editor-pane" aria-label="Markdown editor">
+          <div class="editor-toolbar">
+            <div class="direction-toggle" role="group" aria-label="Editor direction">
+              <button class="direction-button active" data-editor-direction="ltr" title="Left to right" aria-label="Left to right" aria-pressed="true">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 6H3" /><path d="M15 12H3" /><path d="M17 18H3" /></svg>
+                <span>LTR</span>
+              </button>
+              <button class="direction-button" data-editor-direction="rtl" title="Right to left" aria-label="Right to left" aria-pressed="false">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18" /><path d="M9 12h12" /><path d="M7 18h14" /></svg>
+                <span>RTL</span>
+              </button>
+            </div>
+          </div>
+          <div id="editor"></div>
+        </section>
+        <section class="pane preview-pane" aria-label="Markdown preview">
+          <article class="markdown-body" id="preview"></article>
+        </section>
       </section>
       <div class="drop-overlay" id="dropOverlay">Drop Markdown file to open</div>
     </main>
@@ -145,9 +183,27 @@ app.innerHTML = `
           <button class="close-button" id="closeSettingsButton" title="Close settings" aria-label="Close settings">x</button>
         </div>
         <label class="settings-field" for="fontSelect">
-          <span>Font</span>
+          <span>Preview font</span>
           <select id="fontSelect">
             <option value="">System default</option>
+          </select>
+        </label>
+        <label class="settings-check">
+          <input type="checkbox" id="useEditorFontCheckbox" />
+          <span>Use a separate editor font</span>
+        </label>
+        <label class="settings-field" for="editorFontSelect">
+          <span>Editor font</span>
+          <select id="editorFontSelect">
+            <option value="">Same as preview</option>
+          </select>
+        </label>
+        <label class="settings-field" for="themeSelect">
+          <span>Theme</span>
+          <select id="themeSelect">
+            <option value="auto">Auto (system)</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
           </select>
         </label>
         <div class="settings-preview" id="settingsPreview">
@@ -163,10 +219,22 @@ app.innerHTML = `
   </div>
 `;
 
+createIcons({
+  icons: {
+    PanelLeft,
+  },
+});
+
 const fileNameElement = document.querySelector<HTMLDivElement>('#fileName');
 const filePathElement = document.querySelector<HTMLDivElement>('#filePath');
 const dirtyBadge = document.querySelector<HTMLDivElement>('#dirtyBadge');
 const workspace = document.querySelector<HTMLElement>('#workspace');
+const contentShell = document.querySelector<HTMLElement>('.content-shell');
+const sidebarToggleButton =
+  document.querySelector<HTMLButtonElement>('#sidebarToggleButton');
+const fileSidebar = document.querySelector<HTMLElement>('#fileSidebar');
+const sidebarPath = document.querySelector<HTMLDivElement>('#sidebarPath');
+const fileTree = document.querySelector<HTMLDivElement>('#fileTree');
 const preview = document.querySelector<HTMLElement>('#preview');
 const editorHost = document.querySelector<HTMLDivElement>('#editor');
 const openButton = document.querySelector<HTMLButtonElement>('#openButton');
@@ -178,6 +246,10 @@ const settingsModal = document.querySelector<HTMLDivElement>('#settingsModal');
 const closeSettingsButton =
   document.querySelector<HTMLButtonElement>('#closeSettingsButton');
 const fontSelect = document.querySelector<HTMLSelectElement>('#fontSelect');
+const useEditorFontCheckbox =
+  document.querySelector<HTMLInputElement>('#useEditorFontCheckbox');
+const editorFontSelect = document.querySelector<HTMLSelectElement>('#editorFontSelect');
+const themeSelect = document.querySelector<HTMLSelectElement>('#themeSelect');
 const settingsPreview = document.querySelector<HTMLDivElement>('#settingsPreview');
 const resetFontButton = document.querySelector<HTMLButtonElement>('#resetFontButton');
 const saveSettingsButton =
@@ -185,11 +257,19 @@ const saveSettingsButton =
 const modeButtons = Array.from(
   document.querySelectorAll<HTMLButtonElement>('.mode-button'),
 );
+const editorDirectionButtons = Array.from(
+  document.querySelectorAll<HTMLButtonElement>('[data-editor-direction]'),
+);
 
 if (
   !fileNameElement ||
   !filePathElement ||
   !dirtyBadge ||
+  !contentShell ||
+  !sidebarToggleButton ||
+  !fileSidebar ||
+  !sidebarPath ||
+  !fileTree ||
   !workspace ||
   !preview ||
   !editorHost ||
@@ -201,9 +281,13 @@ if (
   !settingsModal ||
   !closeSettingsButton ||
   !fontSelect ||
+  !useEditorFontCheckbox ||
+  !editorFontSelect ||
+  !themeSelect ||
   !settingsPreview ||
   !resetFontButton ||
-  !saveSettingsButton
+  !saveSettingsButton ||
+  editorDirectionButtons.length === 0
 ) {
   throw new Error('Required UI elements are missing.');
 }
@@ -215,8 +299,14 @@ let mode: ViewMode = 'preview';
 let isApplyingDocument = false;
 let appSettings: AppSettings = {
   fontFamily: null,
+  useEditorFont: false,
+  editorFontFamily: null,
+  themeMode: 'auto',
 };
 let fontsLoaded = false;
+let explorerDirectoryPath: string | null = null;
+let isSidebarOpen = false;
+let editorDirection: 'ltr' | 'rtl' = 'ltr';
 
 const editorTheme = new Compartment();
 const editor = new EditorView({
@@ -258,16 +348,43 @@ const toCssFontFamily = (fontFamily: string | null) => {
   return `"${fontFamily.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}", ${defaultFontStack}`;
 };
 
+const getEffectiveTheme = (themeMode: AppSettings['themeMode']) => {
+  if (themeMode === 'auto') {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+
+  return themeMode;
+};
+
 const applySettings = (settings: AppSettings) => {
   appSettings = {
     fontFamily: settings.fontFamily?.trim() || null,
+    useEditorFont: settings.useEditorFont === true,
+    editorFontFamily: settings.editorFontFamily?.trim() || null,
+    themeMode:
+      settings.themeMode === 'light' || settings.themeMode === 'dark'
+        ? settings.themeMode
+        : 'auto',
   };
+  const readerFontFamily = toCssFontFamily(appSettings.fontFamily);
+  const editorFontFamily = appSettings.useEditorFont
+    ? toCssFontFamily(appSettings.editorFontFamily)
+    : readerFontFamily;
   document.documentElement.style.setProperty(
     '--reader-font-family',
-    toCssFontFamily(appSettings.fontFamily),
+    readerFontFamily,
   );
+  document.documentElement.style.setProperty(
+    '--editor-font-family',
+    editorFontFamily,
+  );
+  document.documentElement.dataset.theme = getEffectiveTheme(appSettings.themeMode);
   fontSelect.value = appSettings.fontFamily ?? '';
-  settingsPreview.style.fontFamily = toCssFontFamily(appSettings.fontFamily);
+  editorFontSelect.value = appSettings.editorFontFamily ?? '';
+  useEditorFontCheckbox.checked = appSettings.useEditorFont;
+  editorFontSelect.disabled = !appSettings.useEditorFont;
+  themeSelect.value = appSettings.themeMode;
+  settingsPreview.style.fontFamily = readerFontFamily;
 };
 
 const syncDocumentState = () => {
@@ -305,7 +422,7 @@ const renderPreview = () => {
   });
 };
 
-const getTextDirection = (text: string) => {
+function getTextDirection(text: string) {
   let rtlCount = 0;
   let ltrCount = 0;
   const sample = text.replace(/https?:\/\/\S+|\S+@\S+/g, '').slice(0, 400);
@@ -337,7 +454,7 @@ const getTextDirection = (text: string) => {
   }
 
   return null;
-};
+}
 
 const getDirectionalText = (element: HTMLElement) => {
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
@@ -423,6 +540,7 @@ const openDocument = (document: MarkdownDocument) => {
   setEditorContent(document.content);
   renderPreview();
   syncDocumentState();
+  void setExplorerToCurrentFile().catch(showOpenError);
   setMode('preview');
 };
 
@@ -498,25 +616,39 @@ const loadFonts = async () => {
 
   const fonts = await window.mdReader.listSystemFonts();
   const selectedFont = appSettings.fontFamily;
+  const selectedEditorFont = appSettings.editorFontFamily;
   fontSelect.replaceChildren(new Option('System default', ''));
+  editorFontSelect.replaceChildren(new Option('Same as preview', ''));
 
   fonts.forEach((font) => {
     const option = new Option(font, font);
     option.style.fontFamily = toCssFontFamily(font);
     fontSelect.add(option);
+    const editorOption = new Option(font, font);
+    editorOption.style.fontFamily = toCssFontFamily(font);
+    editorFontSelect.add(editorOption);
   });
 
   if (selectedFont && !fonts.includes(selectedFont)) {
     fontSelect.add(new Option(`${selectedFont} (missing)`, selectedFont));
   }
 
+  if (selectedEditorFont && !fonts.includes(selectedEditorFont)) {
+    editorFontSelect.add(new Option(`${selectedEditorFont} (missing)`, selectedEditorFont));
+  }
+
   fontSelect.value = selectedFont ?? '';
+  editorFontSelect.value = selectedEditorFont ?? '';
   fontsLoaded = true;
 };
 
 const openSettings = async () => {
   await loadFonts();
   fontSelect.value = appSettings.fontFamily ?? '';
+  editorFontSelect.value = appSettings.editorFontFamily ?? '';
+  useEditorFontCheckbox.checked = appSettings.useEditorFont;
+  editorFontSelect.disabled = !appSettings.useEditorFont;
+  themeSelect.value = appSettings.themeMode;
   settingsPreview.style.fontFamily = toCssFontFamily(fontSelect.value || null);
   settingsModal.hidden = false;
   fontSelect.focus();
@@ -529,9 +661,84 @@ const closeSettings = () => {
 const saveSettings = async () => {
   const settings = await window.mdReader.saveSettings({
     fontFamily: fontSelect.value || null,
+    useEditorFont: useEditorFontCheckbox.checked,
+    editorFontFamily: editorFontSelect.value || null,
+    themeMode: themeSelect.value as AppSettings['themeMode'],
   });
   applySettings(settings);
   closeSettings();
+};
+
+const renderFileTree = (directory: ExplorerDirectory) => {
+  explorerDirectoryPath = directory.currentPath;
+  sidebarPath.textContent = directory.currentPath;
+  fileTree.replaceChildren();
+
+  if (directory.parentPath) {
+    const parentButton = document.createElement('button');
+    parentButton.className = 'file-tree-item directory-item';
+    parentButton.type = 'button';
+    parentButton.textContent = '..';
+    parentButton.addEventListener('click', () => {
+      void loadExplorerDirectory(directory.parentPath).catch(showOpenError);
+    });
+    fileTree.append(parentButton);
+  }
+
+  directory.entries.forEach((entry) => {
+    const button = document.createElement('button');
+    button.className = `file-tree-item ${entry.type}-item`;
+    button.type = 'button';
+    button.textContent = entry.name;
+    button.title = entry.filePath;
+    button.classList.toggle('active', entry.filePath === currentFilePath);
+    button.addEventListener('click', () => {
+      if (entry.type === 'directory') {
+        void loadExplorerDirectory(entry.filePath).catch(showOpenError);
+        return;
+      }
+
+      void window.mdReader.readMarkdownFile(entry.filePath).then(openDocument).catch(showOpenError);
+    });
+    fileTree.append(button);
+  });
+};
+
+const loadExplorerDirectory = async (directoryPath: string | null) => {
+  if (!directoryPath) {
+    sidebarPath.textContent = 'No file open';
+    fileTree.replaceChildren();
+    return;
+  }
+
+  const directory = await window.mdReader.listExplorerDirectory(directoryPath);
+  renderFileTree(directory);
+};
+
+const setExplorerToCurrentFile = async () => {
+  if (!currentFilePath) {
+    await loadExplorerDirectory(explorerDirectoryPath);
+    return;
+  }
+
+  const directoryPath = await window.mdReader.dirname(currentFilePath);
+  await loadExplorerDirectory(directoryPath);
+};
+
+const setSidebarOpen = (isOpen: boolean) => {
+  isSidebarOpen = isOpen;
+  contentShell.classList.toggle('sidebar-open', isSidebarOpen);
+  sidebarToggleButton.setAttribute('aria-expanded', String(isSidebarOpen));
+};
+
+const setEditorDirection = (direction: 'ltr' | 'rtl') => {
+  editorDirection = direction;
+  editorHost.classList.toggle('editor-rtl', editorDirection === 'rtl');
+  editorDirectionButtons.forEach((button) => {
+    const isActive = button.dataset.editorDirection === editorDirection;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-pressed', String(isActive));
+  });
 };
 
 function setMode(nextMode: ViewMode) {
@@ -582,8 +789,15 @@ fontSelect.addEventListener('change', () => {
   settingsPreview.style.fontFamily = toCssFontFamily(fontSelect.value || null);
 });
 
+useEditorFontCheckbox.addEventListener('change', () => {
+  editorFontSelect.disabled = !useEditorFontCheckbox.checked;
+});
+
 resetFontButton.addEventListener('click', () => {
   fontSelect.value = '';
+  useEditorFontCheckbox.checked = false;
+  editorFontSelect.value = '';
+  editorFontSelect.disabled = true;
   settingsPreview.style.fontFamily = toCssFontFamily(null);
 });
 
@@ -613,6 +827,27 @@ modeButtons.forEach((button) => {
     setMode(button.dataset.mode as ViewMode);
   });
 });
+
+editorDirectionButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    setEditorDirection(button.dataset.editorDirection as 'ltr' | 'rtl');
+  });
+});
+
+sidebarToggleButton.addEventListener('click', () => {
+  setSidebarOpen(!isSidebarOpen);
+  if (isSidebarOpen && !explorerDirectoryPath) {
+    void setExplorerToCurrentFile().catch(showOpenError);
+  }
+});
+
+window
+  .matchMedia('(prefers-color-scheme: dark)')
+  .addEventListener('change', () => {
+    if (appSettings.themeMode === 'auto') {
+      document.documentElement.dataset.theme = getEffectiveTheme('auto');
+    }
+  });
 
 window.addEventListener('dragover', (event) => {
   event.preventDefault();
