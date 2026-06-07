@@ -191,6 +191,13 @@ app.innerHTML = `
           <div id="editor"></div>
         </section>
         <section class="pane preview-pane" aria-label="Markdown preview">
+          <div class="preview-search" id="previewSearch" hidden>
+            <input id="previewSearchInput" type="search" aria-label="Search preview" placeholder="Search" autocomplete="off" />
+            <span class="preview-search-count" id="previewSearchCount">0/0</span>
+            <button class="preview-search-button" id="previewSearchPreviousButton" title="Previous match" aria-label="Previous match">‹</button>
+            <button class="preview-search-button" id="previewSearchNextButton" title="Next match" aria-label="Next match">›</button>
+            <button class="preview-search-button" id="closePreviewSearchButton" title="Close search" aria-label="Close search">×</button>
+          </div>
           <article class="markdown-body" id="preview"></article>
         </section>
       </section>
@@ -262,7 +269,20 @@ const sidebarToggleButton =
 const fileSidebar = document.querySelector<HTMLElement>('#fileSidebar');
 const sidebarPath = document.querySelector<HTMLDivElement>('#sidebarPath');
 const fileTree = document.querySelector<HTMLDivElement>('#fileTree');
+const editorPane = document.querySelector<HTMLElement>('.editor-pane');
+const previewPane = document.querySelector<HTMLElement>('.preview-pane');
 const preview = document.querySelector<HTMLElement>('#preview');
+const previewSearch = document.querySelector<HTMLDivElement>('#previewSearch');
+const previewSearchInput =
+  document.querySelector<HTMLInputElement>('#previewSearchInput');
+const previewSearchCount =
+  document.querySelector<HTMLSpanElement>('#previewSearchCount');
+const previewSearchPreviousButton =
+  document.querySelector<HTMLButtonElement>('#previewSearchPreviousButton');
+const previewSearchNextButton =
+  document.querySelector<HTMLButtonElement>('#previewSearchNextButton');
+const closePreviewSearchButton =
+  document.querySelector<HTMLButtonElement>('#closePreviewSearchButton');
 const editorHost = document.querySelector<HTMLDivElement>('#editor');
 const openButton = document.querySelector<HTMLButtonElement>('#openButton');
 const saveButton = document.querySelector<HTMLButtonElement>('#saveButton');
@@ -300,7 +320,15 @@ if (
   !sidebarPath ||
   !fileTree ||
   !workspace ||
+  !editorPane ||
+  !previewPane ||
   !preview ||
+  !previewSearch ||
+  !previewSearchInput ||
+  !previewSearchCount ||
+  !previewSearchPreviousButton ||
+  !previewSearchNextButton ||
+  !closePreviewSearchButton ||
   !editorHost ||
   !openButton ||
   !saveButton ||
@@ -339,6 +367,11 @@ let fontsLoadingPromise: Promise<void> | null = null;
 let explorerDirectoryPath: string | null = null;
 let isSidebarOpen = false;
 let editorDirection: 'ltr' | 'rtl' = 'ltr';
+let previewSearchMatches: HTMLElement[] = [];
+let previewSearchIndex = -1;
+let previewSearchRestoreFocus: HTMLElement | null = null;
+let activeWorkspacePane: 'editor' | 'preview' = 'preview';
+let dropOverlayHideTimer: number | null = null;
 
 const editorTheme = new Compartment();
 const editor = new EditorView({
@@ -371,6 +404,154 @@ const getBaseName = (filePath: string | null) => {
 };
 
 const isDirty = () => currentContent !== savedContent;
+
+const clearPreviewSearchHighlights = () => {
+  preview.querySelectorAll('mark.preview-search-match').forEach((mark) => {
+    const text = document.createTextNode(mark.textContent ?? '');
+    mark.replaceWith(text);
+    text.parentElement?.normalize();
+  });
+
+  previewSearchMatches = [];
+  previewSearchIndex = -1;
+};
+
+const updatePreviewSearchCount = () => {
+  if (previewSearchMatches.length === 0) {
+    previewSearchCount.textContent = '0/0';
+    previewSearchPreviousButton.disabled = true;
+    previewSearchNextButton.disabled = true;
+    return;
+  }
+
+  previewSearchCount.textContent = `${previewSearchIndex + 1}/${previewSearchMatches.length}`;
+  previewSearchPreviousButton.disabled = false;
+  previewSearchNextButton.disabled = false;
+};
+
+const getPreviewSearchTextNodes = () => {
+  const nodes: Text[] = [];
+  const walker = document.createTreeWalker(preview, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => {
+      const parent = node.parentElement;
+      if (
+        !parent ||
+        parent.closest('script, style, textarea, input, select, button, svg')
+      ) {
+        return NodeFilter.FILTER_REJECT;
+      }
+
+      return node.textContent?.trim()
+        ? NodeFilter.FILTER_ACCEPT
+        : NodeFilter.FILTER_REJECT;
+    },
+  });
+
+  let currentNode = walker.nextNode();
+  while (currentNode) {
+    nodes.push(currentNode as Text);
+    currentNode = walker.nextNode();
+  }
+
+  return nodes;
+};
+
+const selectPreviewSearchMatch = (index: number) => {
+  if (previewSearchMatches.length === 0) {
+    previewSearchIndex = -1;
+    updatePreviewSearchCount();
+    return;
+  }
+
+  previewSearchMatches[previewSearchIndex]?.classList.remove('current');
+  previewSearchIndex =
+    (index + previewSearchMatches.length) % previewSearchMatches.length;
+  const match = previewSearchMatches[previewSearchIndex];
+  match.classList.add('current');
+  match.scrollIntoView({ block: 'center', inline: 'nearest' });
+  updatePreviewSearchCount();
+};
+
+const updatePreviewSearch = () => {
+  const query = previewSearchInput.value.trim();
+  clearPreviewSearchHighlights();
+
+  if (!query) {
+    updatePreviewSearchCount();
+    return;
+  }
+
+  const lowerQuery = query.toLocaleLowerCase();
+  getPreviewSearchTextNodes().forEach((node) => {
+    const text = node.textContent ?? '';
+    const lowerText = text.toLocaleLowerCase();
+    const fragment = document.createDocumentFragment();
+    let lastIndex = 0;
+    let matchIndex = lowerText.indexOf(lowerQuery);
+
+    while (matchIndex >= 0) {
+      if (matchIndex > lastIndex) {
+        fragment.append(document.createTextNode(text.slice(lastIndex, matchIndex)));
+      }
+
+      const mark = document.createElement('mark');
+      mark.className = 'preview-search-match';
+      mark.textContent = text.slice(matchIndex, matchIndex + query.length);
+      fragment.append(mark);
+      previewSearchMatches.push(mark);
+      lastIndex = matchIndex + query.length;
+      matchIndex = lowerText.indexOf(lowerQuery, lastIndex);
+    }
+
+    if (lastIndex > 0) {
+      fragment.append(document.createTextNode(text.slice(lastIndex)));
+      node.replaceWith(fragment);
+    }
+  });
+
+  selectPreviewSearchMatch(0);
+};
+
+const openPreviewSearch = () => {
+  if (previewSearch.hidden) {
+    previewSearchRestoreFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    previewSearch.hidden = false;
+  }
+
+  previewSearchInput.focus();
+  previewSearchInput.select();
+  updatePreviewSearch();
+};
+
+const closePreviewSearch = () => {
+  previewSearch.hidden = true;
+  clearPreviewSearchHighlights();
+  updatePreviewSearchCount();
+  previewSearchRestoreFocus?.focus();
+  previewSearchRestoreFocus = null;
+};
+
+const setActiveWorkspacePane = (pane: 'editor' | 'preview') => {
+  activeWorkspacePane = pane;
+};
+
+const isPreviewSearchContext = () => {
+  if (mode === 'edit') {
+    return false;
+  }
+
+  if (mode === 'preview') {
+    return true;
+  }
+
+  const active = document.activeElement;
+  if (active instanceof Node && previewPane.contains(active)) {
+    return true;
+  }
+
+  return activeWorkspacePane === 'preview';
+};
 
 const toCssFontFamily = (fontFamily: string | null) => {
   if (!fontFamily) {
@@ -579,6 +760,10 @@ const renderPreview = () => {
       link.rel = 'noreferrer';
     }
   });
+
+  if (!previewSearch.hidden) {
+    updatePreviewSearch();
+  }
 };
 
 function getTextDirection(text: string) {
@@ -940,6 +1125,17 @@ const setEditorDirection = (direction: 'ltr' | 'rtl') => {
 
 function setMode(nextMode: ViewMode) {
   mode = nextMode;
+
+  if (mode === 'edit' && !previewSearch.hidden) {
+    closePreviewSearch();
+  }
+
+  if (mode === 'edit') {
+    setActiveWorkspacePane('editor');
+  } else if (mode === 'preview') {
+    setActiveWorkspacePane('preview');
+  }
+
   workspace.classList.toggle('preview-mode', mode === 'preview');
   workspace.classList.toggle('edit-mode', mode === 'edit');
   workspace.classList.toggle('split-mode', mode === 'split');
@@ -982,6 +1178,35 @@ settingsModal.addEventListener('click', (event) => {
   }
 });
 
+previewSearchInput.addEventListener('input', updatePreviewSearch);
+
+previewSearchInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    selectPreviewSearchMatch(
+      previewSearchIndex + (event.shiftKey ? -1 : 1),
+    );
+    return;
+  }
+
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closePreviewSearch();
+  }
+});
+
+previewSearchPreviousButton.addEventListener('click', () => {
+  selectPreviewSearchMatch(previewSearchIndex - 1);
+  previewSearchInput.focus();
+});
+
+previewSearchNextButton.addEventListener('click', () => {
+  selectPreviewSearchMatch(previewSearchIndex + 1);
+  previewSearchInput.focus();
+});
+
+closePreviewSearchButton.addEventListener('click', closePreviewSearch);
+
 fontSelect.addEventListener('change', () => {
   settingsPreview.style.fontFamily = toCssFontFamily(fontSelect.value || null);
 });
@@ -1019,9 +1244,44 @@ preview.addEventListener('click', (event) => {
   void openMarkdownLink(href).catch(showOpenError);
 });
 
+editorPane.addEventListener('mousedown', () => {
+  setActiveWorkspacePane('editor');
+});
+
+editorPane.addEventListener('focusin', () => {
+  setActiveWorkspacePane('editor');
+});
+
+previewPane.addEventListener('mousedown', () => {
+  setActiveWorkspacePane('preview');
+});
+
+previewPane.addEventListener('focusin', () => {
+  setActiveWorkspacePane('preview');
+});
+
 window.addEventListener('keydown', (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.code === 'KeyF') {
+    if (!settingsModal.hidden) {
+      return;
+    }
+
+    if (!isPreviewSearchContext()) {
+      return;
+    }
+
+    event.preventDefault();
+    openPreviewSearch();
+    return;
+  }
+
   if (event.key === 'Escape' && !settingsModal.hidden) {
     closeSettings();
+    return;
+  }
+
+  if (event.key === 'Escape' && !previewSearch.hidden) {
+    closePreviewSearch();
   }
 });
 
@@ -1053,8 +1313,26 @@ window
   });
 
 const hideDropOverlay = () => {
+  if (dropOverlayHideTimer !== null) {
+    window.clearTimeout(dropOverlayHideTimer);
+    dropOverlayHideTimer = null;
+  }
+
   dropOverlay.classList.remove('visible');
 };
+
+const keepDropOverlayVisible = () => {
+  dropOverlay.classList.add('visible');
+
+  if (dropOverlayHideTimer !== null) {
+    window.clearTimeout(dropOverlayHideTimer);
+  }
+
+  dropOverlayHideTimer = window.setTimeout(hideDropOverlay, 250);
+};
+
+const hasDraggedFiles = (event: DragEvent) =>
+  Array.from(event.dataTransfer?.types ?? []).includes('Files');
 
 const isOutsideViewport = (event: DragEvent) =>
   event.clientX <= 0 ||
@@ -1062,17 +1340,37 @@ const isOutsideViewport = (event: DragEvent) =>
   event.clientX >= window.innerWidth ||
   event.clientY >= window.innerHeight;
 
-window.addEventListener('dragover', (event) => {
+window.addEventListener('dragenter', (event) => {
+  if (!hasDraggedFiles(event)) {
+    return;
+  }
+
   event.preventDefault();
-  dropOverlay.classList.add('visible');
+  keepDropOverlayVisible();
+});
+
+window.addEventListener('dragover', (event) => {
+  if (!hasDraggedFiles(event)) {
+    return;
+  }
+
+  event.preventDefault();
+  keepDropOverlayVisible();
 });
 
 window.addEventListener('dragleave', (event) => {
   if (
+    !event.relatedTarget ||
     event.target === document.body ||
     event.target === document.documentElement ||
     isOutsideViewport(event)
   ) {
+    hideDropOverlay();
+  }
+});
+
+window.addEventListener('mouseout', (event) => {
+  if (!event.relatedTarget) {
     hideDropOverlay();
   }
 });
