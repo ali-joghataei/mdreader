@@ -863,6 +863,17 @@ const applyPreviewDirection = () => {
 
     list.removeAttribute('dir');
   });
+
+  preview.querySelectorAll<HTMLTableElement>('table').forEach((table) => {
+    const headerCells = Array.from(table.querySelectorAll<HTMLElement>('thead th'));
+
+    if (headerCells.length > 0 && headerCells.every((cell) => cell.dir === 'rtl')) {
+      table.dir = 'rtl';
+      return;
+    }
+
+    table.removeAttribute('dir');
+  });
 };
 
 const setEditorContent = (content: string) => {
