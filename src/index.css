@@ -525,6 +525,42 @@ button {
   background: transparent;
 }
 
+.markdown-body .mermaid-diagram {
+  display: block;
+  overflow-x: auto;
+  margin: 0 0 1em;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  text-align: center;
+}
+
+.markdown-body .mermaid-diagram svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.markdown-body .mermaid-diagram.is-loading {
+  color: var(--text-muted);
+}
+
+.markdown-body .mermaid-diagram.mermaid-error {
+  text-align: left;
+}
+
+.markdown-body .mermaid-diagram.mermaid-error p {
+  margin: 0.5em 0 1em;
+  color: var(--text-muted);
+}
+
+.markdown-body .mermaid-diagram.mermaid-error pre {
+  margin: 0;
+  background: var(--surface);
+}
+
 .markdown-body table {
   display: block;
   width: 100%;

@@ -97,6 +97,23 @@ const markdownParser = new MarkdownIt({
     },
   });
 
+const defaultFenceRenderer = markdownParser.renderer.rules.fence;
+markdownParser.renderer.rules.fence = (tokens, index, options, env, self) => {
+  const token = tokens[index];
+  const language = token.info.trim().split(/\s+/)[0]?.toLowerCase();
+
+  if (language === 'mermaid') {
+    const source = encodeURIComponent(token.content);
+    return `<div class="mermaid-diagram" data-mermaid-source="${source}"></div>`;
+  }
+
+  if (defaultFenceRenderer) {
+    return defaultFenceRenderer(tokens, index, options, env, self);
+  }
+
+  return self.renderToken(tokens, index, options);
+};
+
 const blockDirectionSelector = [
   'p',
   'li',
@@ -117,6 +134,8 @@ const blockDirectionSelector = [
 
 const rtlCharacterPattern = /[\p{Script=Arabic}\p{Script=Hebrew}]/u;
 const ltrCharacterPattern = /[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}]/u;
+let previewRenderSerial = 0;
+let mermaidPromise: Promise<typeof import('mermaid').default> | null = null;
 
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -392,6 +411,102 @@ const getEffectiveTheme = (themeMode: AppSettings['themeMode']) => {
   return themeMode;
 };
 
+const loadMermaid = async () => {
+  mermaidPromise ??= import('mermaid').then((module) => module.default);
+  return mermaidPromise;
+};
+
+const initializeMermaid = async () => {
+  const mermaid = await loadMermaid();
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    htmlLabels: false,
+    theme: getEffectiveTheme(appSettings.themeMode) === 'dark' ? 'dark' : 'default',
+    flowchart: {
+      htmlLabels: false,
+      useMaxWidth: true,
+    },
+  });
+
+  return mermaid;
+};
+
+const showMermaidError = (
+  container: HTMLElement,
+  source: string,
+  error: unknown,
+) => {
+  const title = document.createElement('strong');
+  title.textContent = 'Could not render Mermaid diagram';
+
+  const message = document.createElement('p');
+  message.textContent = error instanceof Error ? error.message : String(error);
+
+  const code = document.createElement('code');
+  code.textContent = source;
+
+  const pre = document.createElement('pre');
+  pre.append(code);
+
+  container.classList.add('mermaid-error');
+  container.replaceChildren(title, message, pre);
+};
+
+const renderMermaidDiagrams = async (renderSerial: number) => {
+  const diagrams = Array.from(
+    preview.querySelectorAll<HTMLElement>('.mermaid-diagram[data-mermaid-source]'),
+  );
+
+  if (diagrams.length === 0) {
+    return;
+  }
+
+  const mermaid = await initializeMermaid();
+
+  if (renderSerial !== previewRenderSerial) {
+    return;
+  }
+
+  for (const [index, diagram] of diagrams.entries()) {
+    if (renderSerial !== previewRenderSerial) {
+      return;
+    }
+
+    const encodedSource = diagram.dataset.mermaidSource;
+    if (!encodedSource) {
+      continue;
+    }
+
+    const source = decodeURIComponent(encodedSource);
+    diagram.classList.add('is-loading');
+    diagram.textContent = 'Rendering diagram...';
+
+    try {
+      const { svg, bindFunctions } = await mermaid.render(
+        `mermaid-${renderSerial}-${index}`,
+        source,
+      );
+
+      if (renderSerial !== previewRenderSerial) {
+        return;
+      }
+
+      diagram.classList.remove('is-loading', 'mermaid-error');
+      diagram.removeAttribute('data-mermaid-source');
+      diagram.innerHTML = DOMPurify.sanitize(svg);
+      bindFunctions?.(diagram);
+    } catch (error) {
+      if (renderSerial !== previewRenderSerial) {
+        return;
+      }
+
+      diagram.classList.remove('is-loading');
+      showMermaidError(diagram, source, error);
+    }
+  }
+};
+
 const applySettings = (settings: AppSettings) => {
   appSettings = {
     fontFamily: settings.fontFamily?.trim() || null,
@@ -444,12 +559,14 @@ const syncDocumentState = () => {
 };
 
 const renderPreview = () => {
+  const renderSerial = ++previewRenderSerial;
   const rawHtml = markdownParser.render(currentContent);
   preview.innerHTML = DOMPurify.sanitize(rawHtml, {
-    ADD_ATTR: ['target', 'rel', 'class'],
+    ADD_ATTR: ['target', 'rel', 'class', 'data-mermaid-source'],
   });
 
   applyPreviewDirection();
+  void renderMermaidDiagrams(renderSerial).catch(showOpenError);
 
   preview.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((link) => {
     const href = link.getAttribute('href');
