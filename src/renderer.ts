@@ -316,6 +316,7 @@ let appSettings: AppSettings = {
   themeMode: 'auto',
 };
 let fontsLoaded = false;
+let fontsLoadingPromise: Promise<void> | null = null;
 let explorerDirectoryPath: string | null = null;
 let isSidebarOpen = false;
 let editorDirection: 'ltr' | 'rtl' = 'ltr';
@@ -358,6 +359,29 @@ const toCssFontFamily = (fontFamily: string | null) => {
   }
 
   return `"${fontFamily.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}", ${defaultFontStack}`;
+};
+
+const ensureSelectOption = (
+  select: HTMLSelectElement,
+  value: string | null,
+  label = value,
+) => {
+  if (!value || Array.from(select.options).some((option) => option.value === value)) {
+    return;
+  }
+
+  select.add(new Option(label ?? value, value));
+};
+
+const setFontControlsLoading = (isLoading: boolean) => {
+  fontSelect.disabled = isLoading;
+  fontSelect.classList.toggle('is-loading', isLoading);
+  fontSelect.ariaBusy = String(isLoading);
+  useEditorFontCheckbox.disabled = !customizeEditorFontCheckbox.checked;
+  editorFontSelect.classList.toggle('is-loading', isLoading);
+  editorFontSelect.ariaBusy = String(isLoading);
+  editorFontSelect.disabled =
+    isLoading || !customizeEditorFontCheckbox.checked || !useEditorFontCheckbox.checked;
 };
 
 const getEffectiveTheme = (themeMode: AppSettings['themeMode']) => {
@@ -632,46 +656,59 @@ const loadFonts = async () => {
     return;
   }
 
-  const fonts = await window.mdReader.listSystemFonts();
-  const selectedFont = appSettings.fontFamily;
-  const selectedEditorFont = appSettings.editorFontFamily;
-  fontSelect.replaceChildren(new Option('System default', ''));
-  editorFontSelect.replaceChildren(new Option('Same as preview', ''));
+  if (!fontsLoadingPromise) {
+    setFontControlsLoading(true);
+    fontsLoadingPromise = (async () => {
+      const fonts = await window.mdReader.listSystemFonts();
+      const selectedFont = appSettings.fontFamily;
+      const selectedEditorFont = appSettings.editorFontFamily;
+      fontSelect.replaceChildren(new Option('System default', ''));
+      editorFontSelect.replaceChildren(new Option('Same as preview', ''));
 
-  fonts.forEach((font) => {
-    const option = new Option(font, font);
-    option.style.fontFamily = toCssFontFamily(font);
-    fontSelect.add(option);
-    const editorOption = new Option(font, font);
-    editorOption.style.fontFamily = toCssFontFamily(font);
-    editorFontSelect.add(editorOption);
-  });
+      fonts.forEach((font) => {
+        const option = new Option(font, font);
+        option.style.fontFamily = toCssFontFamily(font);
+        fontSelect.add(option);
+        const editorOption = new Option(font, font);
+        editorOption.style.fontFamily = toCssFontFamily(font);
+        editorFontSelect.add(editorOption);
+      });
 
-  if (selectedFont && !fonts.includes(selectedFont)) {
-    fontSelect.add(new Option(`${selectedFont} (missing)`, selectedFont));
+      if (selectedFont && !fonts.includes(selectedFont)) {
+        fontSelect.add(new Option(`${selectedFont} (missing)`, selectedFont));
+      }
+
+      if (selectedEditorFont && !fonts.includes(selectedEditorFont)) {
+        editorFontSelect.add(new Option(`${selectedEditorFont} (missing)`, selectedEditorFont));
+      }
+
+      fontSelect.value = selectedFont ?? '';
+      editorFontSelect.value = selectedEditorFont ?? '';
+      fontsLoaded = true;
+    })().finally(() => {
+      fontsLoadingPromise = null;
+      setFontControlsLoading(false);
+    });
   }
 
-  if (selectedEditorFont && !fonts.includes(selectedEditorFont)) {
-    editorFontSelect.add(new Option(`${selectedEditorFont} (missing)`, selectedEditorFont));
-  }
-
-  fontSelect.value = selectedFont ?? '';
-  editorFontSelect.value = selectedEditorFont ?? '';
-  fontsLoaded = true;
+  await fontsLoadingPromise;
 };
 
-const openSettings = async () => {
-  await loadFonts();
+const openSettings = () => {
+  ensureSelectOption(fontSelect, appSettings.fontFamily);
+  ensureSelectOption(editorFontSelect, appSettings.editorFontFamily);
   fontSelect.value = appSettings.fontFamily ?? '';
   editorFontSelect.value = appSettings.editorFontFamily ?? '';
   customizeEditorFontCheckbox.checked = appSettings.customizeEditorFont;
   useEditorFontCheckbox.checked = appSettings.useEditorFont;
-  useEditorFontCheckbox.disabled = !appSettings.customizeEditorFont;
-  editorFontSelect.disabled = !appSettings.customizeEditorFont || !appSettings.useEditorFont;
   themeSelect.value = appSettings.themeMode;
   settingsPreview.style.fontFamily = toCssFontFamily(fontSelect.value || null);
+  setFontControlsLoading(!fontsLoaded);
   settingsModal.hidden = false;
-  fontSelect.focus();
+  closeSettingsButton.focus();
+  window.requestAnimationFrame(() => {
+    void loadFonts().catch(showOpenError);
+  });
 };
 
 const closeSettings = () => {
@@ -817,7 +854,7 @@ saveAsButton.addEventListener('click', () => {
 });
 
 settingsButton.addEventListener('click', () => {
-  void openSettings().catch(showOpenError);
+  openSettings();
 });
 
 closeSettingsButton.addEventListener('click', closeSettings);
@@ -833,14 +870,11 @@ fontSelect.addEventListener('change', () => {
 });
 
 customizeEditorFontCheckbox.addEventListener('change', () => {
-  useEditorFontCheckbox.disabled = !customizeEditorFontCheckbox.checked;
-  editorFontSelect.disabled =
-    !customizeEditorFontCheckbox.checked || !useEditorFontCheckbox.checked;
+  setFontControlsLoading(fontsLoadingPromise !== null && !fontsLoaded);
 });
 
 useEditorFontCheckbox.addEventListener('change', () => {
-  editorFontSelect.disabled =
-    !customizeEditorFontCheckbox.checked || !useEditorFontCheckbox.checked;
+  setFontControlsLoading(fontsLoadingPromise !== null && !fontsLoaded);
 });
 
 resetFontButton.addEventListener('click', () => {
@@ -962,7 +996,7 @@ window.mdReader.onMenuCommand((command: MenuCommand) => {
   }
 
   if (command === 'settings') {
-    void openSettings().catch(showOpenError);
+    openSettings();
   }
 });
 
