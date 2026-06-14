@@ -605,10 +605,11 @@ button {
 }
 
 .markdown-body .mermaid-diagram {
+  position: relative;
   display: block;
   overflow-x: auto;
   margin: 0 0 1em;
-  padding: 16px;
+  padding: 42px 16px 16px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface-muted);
@@ -623,11 +624,22 @@ button {
 }
 
 .markdown-body .mermaid-diagram.is-loading {
+  padding: 16px;
   color: var(--text-muted);
 }
 
 .markdown-body .mermaid-diagram.mermaid-error {
+  padding: 16px;
   text-align: left;
+}
+
+.markdown-body .mermaid-open-button {
+  position: absolute;
+  top: 8px;
+  inset-inline-end: 8px;
+  z-index: 1;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 12%);
 }
 
 .markdown-body .mermaid-diagram.mermaid-error p {
