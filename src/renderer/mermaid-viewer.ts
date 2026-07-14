@@ -127,7 +127,6 @@ export const createMermaidViewerHtml = (svgMarkup: string, theme: 'light' | 'dar
       right: 0;
       bottom: 0;
       left: 0;
-      padding: 32px;
     }
 
     .mermaid-viewer-content svg {

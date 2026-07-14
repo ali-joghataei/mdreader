@@ -183,10 +183,9 @@ const buildMenu = () => {
         { role: 'reload' },
         { role: 'forceReload' },
         {
-          label: 'Toggle Developer Tools',
+          role: 'toggleDevTools',
           accelerator:
             process.platform === 'darwin' ? 'Alt+Command+I' : 'Ctrl+Shift+I',
-          click: () => mainWindow?.webContents.toggleDevTools(),
         },
         { type: 'separator' },
         { role: 'resetZoom' },
