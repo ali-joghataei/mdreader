@@ -528,12 +528,24 @@ button {
   text-align: left;
 }
 
-.markdown-body pre,
-.markdown-body code,
+.markdown-body pre:not(.soft-code-block),
+.markdown-body pre:not(.soft-code-block) code,
+.markdown-body code.ltr-inline-code,
 .markdown-body kbd,
 .markdown-body samp {
   direction: ltr;
   text-align: left;
+}
+
+.markdown-body pre.soft-code-block,
+.markdown-body pre.soft-code-block code {
+  text-align: start;
+  unicode-bidi: plaintext;
+}
+
+.markdown-body code.rtl-inline-code {
+  direction: rtl;
+  unicode-bidi: isolate;
 }
 
 .split-mode .markdown-body {

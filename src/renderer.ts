@@ -56,6 +56,18 @@ type ExplorerDirectory = {
 const defaultFontStack =
   'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
+const softCodeBlockLanguages = new Set(['', 'text', 'txt', 'plain', 'plaintext']);
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+const isSoftCodeBlockLanguage = (language: string | undefined) =>
+  softCodeBlockLanguages.has(language ?? '');
+
 const markdownParser = new MarkdownIt({
   html: true,
   linkify: true,
@@ -105,6 +117,13 @@ markdownParser.renderer.rules.fence = (tokens, index, options, env, self) => {
   if (language === 'mermaid') {
     const source = encodeURIComponent(token.content);
     return `<div class="mermaid-diagram" data-mermaid-source="${source}"></div>`;
+  }
+
+  if (isSoftCodeBlockLanguage(language)) {
+    const languageClass = language ? ` class="language-${escapeHtml(language)}"` : '';
+    return `<pre class="soft-code-block"><code${languageClass}>${escapeHtml(
+      token.content,
+    )}</code></pre>\n`;
   }
 
   if (defaultFenceRenderer) {
@@ -1288,8 +1307,30 @@ const getDirectionalText = (element: HTMLElement) => {
 };
 
 const applyPreviewDirection = () => {
-  preview.querySelectorAll<HTMLElement>('pre, code, kbd, samp').forEach((element) => {
-    element.dir = 'ltr';
+  preview.querySelectorAll<HTMLElement>('pre.soft-code-block').forEach((pre) => {
+    const direction = getTextDirection(pre.textContent ?? '') ?? 'auto';
+    pre.dir = direction;
+    pre.classList.toggle('rtl-block', direction === 'rtl');
+    pre.classList.toggle('ltr-block', direction === 'ltr');
+
+    pre.querySelectorAll<HTMLElement>('code').forEach((code) => {
+      code.dir = direction;
+    });
+  });
+
+  preview
+    .querySelectorAll<HTMLElement>(
+      'pre:not(.soft-code-block), pre:not(.soft-code-block) code, kbd, samp',
+    )
+    .forEach((element) => {
+      element.dir = 'ltr';
+    });
+
+  preview.querySelectorAll<HTMLElement>('code:not(pre code)').forEach((element) => {
+    const direction = getTextDirection(element.textContent ?? '') ?? 'ltr';
+    element.dir = direction;
+    element.classList.toggle('rtl-inline-code', direction === 'rtl');
+    element.classList.toggle('ltr-inline-code', direction === 'ltr');
   });
 
   preview.querySelectorAll<HTMLElement>(blockDirectionSelector).forEach((element) => {
