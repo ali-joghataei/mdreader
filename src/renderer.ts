@@ -5,7 +5,19 @@ import 'katex/dist/katex.min.css';
 import { EditorView, basicSetup } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { Compartment, EditorState } from '@codemirror/state';
-import { ArrowUp, FileText, Folder, Maximize2, PanelLeft, createIcons } from 'lucide';
+import {
+  ArrowUp,
+  Columns2,
+  Eye,
+  FileText,
+  Folder,
+  Maximize2,
+  PanelLeft,
+  Pencil,
+  Settings,
+  SlidersHorizontal,
+  createIcons,
+} from 'lucide';
 import DOMPurify from 'dompurify';
 import hljs from 'highlight.js';
 import MarkdownIt from 'markdown-it';
@@ -42,6 +54,11 @@ const defaultFontStack =
   'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
 const softCodeBlockLanguages = new Set(['', 'text', 'txt', 'plain', 'plaintext']);
+const contentZoomMin = 0.7;
+const contentZoomMax = 1.8;
+const contentZoomStep = 0.1;
+const previewBaseFontSize = 15;
+const editorBaseFontSize = 14;
 
 const escapeHtml = (value: string) =>
   value
@@ -148,10 +165,15 @@ if (!app) {
 app.innerHTML = appTemplate;
 const lucideIcons = {
   ArrowUp,
+  Columns2,
+  Eye,
   FileText,
   Folder,
   Maximize2,
   PanelLeft,
+  Pencil,
+  Settings,
+  SlidersHorizontal,
 };
 
 createIcons({ icons: lucideIcons });
@@ -175,10 +197,8 @@ const {
   previewSearchNextButton,
   closePreviewSearchButton,
   editorHost,
-  openButton,
-  saveButton,
-  saveAsButton,
   settingsButton,
+  paneToolbarsToggleButton,
   dropOverlay,
   externalChangeModal,
   externalChangeMessage,
@@ -196,6 +216,7 @@ const {
   saveSettingsButton,
   modeButtons,
   editorDirectionButtons,
+  previewWidthButtons,
 } = getAppElements();
 let currentFilePath: string | null = null;
 let savedContent = '';
@@ -208,6 +229,9 @@ let fontsLoadingPromise: Promise<void> | null = null;
 let explorerDirectoryPath: string | null = null;
 let isSidebarOpen = false;
 let editorDirection: 'ltr' | 'rtl' = 'ltr';
+let previewWidthMode: 'reader' | 'wide' = 'reader';
+let arePaneToolbarsVisible = true;
+let contentZoom = 1;
 let previewSearchMatches: HTMLElement[] = [];
 let previewSearchIndex = -1;
 let previewSearchRestoreFocus: HTMLElement | null = null;
@@ -1051,6 +1075,47 @@ const setEditorDirection = (direction: 'ltr' | 'rtl') => {
   });
 };
 
+const setPreviewWidthMode = (widthMode: 'reader' | 'wide') => {
+  previewWidthMode = widthMode;
+  previewPane.classList.toggle('preview-width-wide', previewWidthMode === 'wide');
+  previewWidthButtons.forEach((button) => {
+    const isActive = button.dataset.previewWidth === previewWidthMode;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-pressed', String(isActive));
+  });
+};
+
+const setPaneToolbarsVisible = (isVisible: boolean) => {
+  arePaneToolbarsVisible = isVisible;
+  workspace.classList.toggle('pane-toolbars-hidden', !arePaneToolbarsVisible);
+  paneToolbarsToggleButton.setAttribute('aria-pressed', String(arePaneToolbarsVisible));
+  paneToolbarsToggleButton.classList.toggle('active', arePaneToolbarsVisible);
+};
+
+const clampContentZoom = (zoom: number) =>
+  Math.min(contentZoomMax, Math.max(contentZoomMin, Number(zoom.toFixed(2))));
+
+const setContentZoom = (zoom: number) => {
+  contentZoom = clampContentZoom(zoom);
+  workspace.style.setProperty('--content-zoom', String(contentZoom));
+  workspace.style.setProperty(
+    '--preview-content-font-size',
+    `${previewBaseFontSize * contentZoom}px`,
+  );
+  workspace.style.setProperty(
+    '--editor-content-font-size',
+    `${editorBaseFontSize * contentZoom}px`,
+  );
+};
+
+const stepContentZoom = (direction: 1 | -1) => {
+  setContentZoom(contentZoom + direction * contentZoomStep);
+};
+
+const resetContentZoom = () => {
+  setContentZoom(1);
+};
+
 function setMode(nextMode: ViewMode) {
   mode = nextMode;
 
@@ -1082,20 +1147,12 @@ const showOpenError = (error: unknown) => {
   )}</p></div>`;
 };
 
-openButton.addEventListener('click', () => {
-  void openFromDialog().catch(showOpenError);
-});
-
-saveButton.addEventListener('click', () => {
-  void save().catch(showOpenError);
-});
-
-saveAsButton.addEventListener('click', () => {
-  void saveAs().catch(showOpenError);
-});
-
 settingsButton.addEventListener('click', () => {
   openSettings();
+});
+
+paneToolbarsToggleButton.addEventListener('click', () => {
+  setPaneToolbarsVisible(!arePaneToolbarsVisible);
 });
 
 closeSettingsButton.addEventListener('click', closeSettings);
@@ -1194,7 +1251,37 @@ previewPane.addEventListener('focusin', () => {
   setActiveWorkspacePane('preview');
 });
 
+const handleContentZoomShortcut = (event: KeyboardEvent) => {
+  if (!event.ctrlKey && !event.metaKey) {
+    return false;
+  }
+
+  if (event.code === 'Equal' || event.code === 'NumpadAdd') {
+    event.preventDefault();
+    stepContentZoom(1);
+    return true;
+  }
+
+  if (event.code === 'Minus' || event.code === 'NumpadSubtract') {
+    event.preventDefault();
+    stepContentZoom(-1);
+    return true;
+  }
+
+  if (event.code === 'Digit0' || event.code === 'Numpad0') {
+    event.preventDefault();
+    resetContentZoom();
+    return true;
+  }
+
+  return false;
+};
+
 window.addEventListener('keydown', (event) => {
+  if (handleContentZoomShortcut(event)) {
+    return;
+  }
+
   if ((event.ctrlKey || event.metaKey) && event.code === 'KeyF') {
     if (!settingsModal.hidden || !externalChangeModal.hidden) {
       return;
@@ -1225,6 +1312,19 @@ window.addEventListener('keydown', (event) => {
   }
 });
 
+window.addEventListener(
+  'wheel',
+  (event) => {
+    if (!event.ctrlKey && !event.metaKey) {
+      return;
+    }
+
+    event.preventDefault();
+    stepContentZoom(event.deltaY < 0 ? 1 : -1);
+  },
+  { passive: false },
+);
+
 modeButtons.forEach((button) => {
   button.addEventListener('click', () => {
     setMode(button.dataset.mode as ViewMode);
@@ -1234,6 +1334,12 @@ modeButtons.forEach((button) => {
 editorDirectionButtons.forEach((button) => {
   button.addEventListener('click', () => {
     setEditorDirection(button.dataset.editorDirection as 'ltr' | 'rtl');
+  });
+});
+
+previewWidthButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    setPreviewWidthMode(button.dataset.previewWidth as 'reader' | 'wide');
   });
 });
 
@@ -1353,6 +1459,18 @@ window.mdReader.onMenuCommand((command: MenuCommand) => {
 
   if (command === 'settings') {
     openSettings();
+  }
+
+  if (command === 'zoom-in') {
+    stepContentZoom(1);
+  }
+
+  if (command === 'zoom-out') {
+    stepContentZoom(-1);
+  }
+
+  if (command === 'reset-zoom') {
+    resetContentZoom();
   }
 });
 

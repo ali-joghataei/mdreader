@@ -14,6 +14,10 @@
     flex: 1;
   }
 
+  .toolbar-actions .icon-only-button {
+    flex: 0 0 34px;
+  }
+
   .workspace.split-mode {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(220px, 42%) minmax(260px, 58%);
@@ -28,5 +32,8 @@
     width: calc(100% - 30px);
     padding-top: 22px;
   }
-}
 
+  .preview-pane.preview-width-wide .markdown-body {
+    padding-inline: 15px;
+  }
+}

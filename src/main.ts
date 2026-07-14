@@ -180,17 +180,27 @@ const buildMenu = () => {
     {
       label: 'View',
       submenu: [
-        { role: 'reload' },
-        { role: 'forceReload' },
         {
           role: 'toggleDevTools',
           accelerator:
             process.platform === 'darwin' ? 'Alt+Command+I' : 'Ctrl+Shift+I',
         },
         { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
+        {
+          label: 'Reset Zoom',
+          accelerator: 'CmdOrCtrl+0',
+          click: () => sendMenuCommand('reset-zoom'),
+        },
+        {
+          label: 'Zoom In',
+          accelerator: 'CmdOrCtrl+Plus',
+          click: () => sendMenuCommand('zoom-in'),
+        },
+        {
+          label: 'Zoom Out',
+          accelerator: 'CmdOrCtrl+-',
+          click: () => sendMenuCommand('zoom-out'),
+        },
         { type: 'separator' },
         { role: 'togglefullscreen' },
       ],

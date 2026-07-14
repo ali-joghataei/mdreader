@@ -1,6 +1,13 @@
 export type ViewMode = 'preview' | 'edit' | 'split';
 
-export type MenuCommand = 'open' | 'save' | 'save-as' | 'settings';
+export type MenuCommand =
+  | 'open'
+  | 'save'
+  | 'save-as'
+  | 'settings'
+  | 'zoom-in'
+  | 'zoom-out'
+  | 'reset-zoom';
 
 export type MarkdownDocument = {
   filePath: string;

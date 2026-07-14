@@ -8,15 +8,13 @@ export const appTemplate = `
       </div>
       <div class="dirty-badge" id="dirtyBadge" hidden>Unsaved</div>
       <div class="toolbar-actions">
-        <button class="icon-button" id="openButton" title="Open Markdown file" aria-label="Open Markdown file">Open</button>
-        <button class="icon-button" id="saveButton" title="Save" aria-label="Save">Save</button>
-        <button class="icon-button" id="saveAsButton" title="Save as" aria-label="Save as">Save As</button>
-        <button class="icon-button" id="settingsButton" title="Settings" aria-label="Settings">Settings</button>
+        <button class="icon-button icon-only-button active" id="paneToolbarsToggleButton" title="Toggle pane toolbars" aria-label="Toggle pane toolbars" aria-pressed="true"><i data-lucide="sliders-horizontal"></i></button>
+        <button class="icon-button icon-only-button" id="settingsButton" title="Settings" aria-label="Settings"><i data-lucide="settings"></i></button>
       </div>
       <div class="mode-switch" role="tablist" aria-label="View mode">
-        <button class="mode-button active" data-mode="preview" role="tab" aria-selected="true">Preview</button>
-        <button class="mode-button" data-mode="edit" role="tab" aria-selected="false">Edit</button>
-        <button class="mode-button" data-mode="split" role="tab" aria-selected="false">Split</button>
+        <button class="mode-button active" data-mode="preview" role="tab" aria-selected="true"><i data-lucide="eye"></i><span>Preview</span></button>
+        <button class="mode-button" data-mode="edit" role="tab" aria-selected="false"><i data-lucide="pencil"></i><span>Edit</span></button>
+        <button class="mode-button" data-mode="split" role="tab" aria-selected="false"><i data-lucide="columns-2"></i><span>Split</span></button>
       </div>
     </header>
     <main class="content-shell">
@@ -46,14 +44,28 @@ export const appTemplate = `
           <div id="editor"></div>
         </section>
         <section class="pane preview-pane" aria-label="Markdown preview">
-          <div class="preview-search" id="previewSearch" hidden>
-            <input id="previewSearchInput" type="search" aria-label="Search preview" placeholder="Search" autocomplete="off" />
-            <span class="preview-search-count" id="previewSearchCount">0/0</span>
-            <button class="preview-search-button" id="previewSearchPreviousButton" title="Previous match" aria-label="Previous match">‹</button>
-            <button class="preview-search-button" id="previewSearchNextButton" title="Next match" aria-label="Next match">›</button>
-            <button class="preview-search-button" id="closePreviewSearchButton" title="Close search" aria-label="Close search">×</button>
+          <div class="preview-toolbar">
+            <div class="preview-width-toggle" role="group" aria-label="Preview width">
+              <button class="preview-width-button active" data-preview-width="reader" title="Reader width" aria-label="Reader width" aria-pressed="true">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10" /><path d="M7 20h10" /><path d="M8 8h8" /><path d="M8 12h8" /><path d="M8 16h8" /></svg>
+                <span>Reader</span>
+              </button>
+              <button class="preview-width-button" data-preview-width="wide" title="Wide width" aria-label="Wide width" aria-pressed="false">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18" /><path d="M3 20h18" /><path d="M4 8h16" /><path d="M4 12h16" /><path d="M4 16h16" /></svg>
+                <span>Wide</span>
+              </button>
+            </div>
           </div>
-          <article class="markdown-body" id="preview"></article>
+          <div class="preview-scroll">
+            <div class="preview-search" id="previewSearch" hidden>
+              <input id="previewSearchInput" type="search" aria-label="Search preview" placeholder="Search" autocomplete="off" />
+              <span class="preview-search-count" id="previewSearchCount">0/0</span>
+              <button class="preview-search-button" id="previewSearchPreviousButton" title="Previous match" aria-label="Previous match">‹</button>
+              <button class="preview-search-button" id="previewSearchNextButton" title="Next match" aria-label="Next match">›</button>
+              <button class="preview-search-button" id="closePreviewSearchButton" title="Close search" aria-label="Close search">×</button>
+            </div>
+            <article class="markdown-body" id="preview"></article>
+          </div>
         </section>
       </section>
       <div class="drop-overlay" id="dropOverlay">Drop Markdown file to open</div>
@@ -116,4 +128,3 @@ export const appTemplate = `
     </div>
   </div>
 `;
-

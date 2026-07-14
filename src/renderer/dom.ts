@@ -24,10 +24,9 @@ export const getAppElements = () => {
   const closePreviewSearchButton =
     document.querySelector<HTMLButtonElement>('#closePreviewSearchButton');
   const editorHost = document.querySelector<HTMLDivElement>('#editor');
-  const openButton = document.querySelector<HTMLButtonElement>('#openButton');
-  const saveButton = document.querySelector<HTMLButtonElement>('#saveButton');
-  const saveAsButton = document.querySelector<HTMLButtonElement>('#saveAsButton');
   const settingsButton = document.querySelector<HTMLButtonElement>('#settingsButton');
+  const paneToolbarsToggleButton =
+    document.querySelector<HTMLButtonElement>('#paneToolbarsToggleButton');
   const dropOverlay = document.querySelector<HTMLDivElement>('#dropOverlay');
   const externalChangeModal = document.querySelector<HTMLDivElement>('#externalChangeModal');
   const externalChangeMessage =
@@ -56,6 +55,9 @@ export const getAppElements = () => {
   const editorDirectionButtons = Array.from(
     document.querySelectorAll<HTMLButtonElement>('[data-editor-direction]'),
   );
+  const previewWidthButtons = Array.from(
+    document.querySelectorAll<HTMLButtonElement>('[data-preview-width]'),
+  );
   
   if (
     !fileNameElement ||
@@ -77,10 +79,8 @@ export const getAppElements = () => {
     !previewSearchNextButton ||
     !closePreviewSearchButton ||
     !editorHost ||
-    !openButton ||
-    !saveButton ||
-    !saveAsButton ||
     !settingsButton ||
+    !paneToolbarsToggleButton ||
     !dropOverlay ||
     !externalChangeModal ||
     !externalChangeMessage ||
@@ -96,7 +96,8 @@ export const getAppElements = () => {
     !settingsPreview ||
     !resetFontButton ||
     !saveSettingsButton ||
-    editorDirectionButtons.length === 0
+    editorDirectionButtons.length === 0 ||
+    previewWidthButtons.length === 0
   ) {
     throw new Error('Required UI elements are missing.');
   }
@@ -121,10 +122,8 @@ export const getAppElements = () => {
     previewSearchNextButton,
     closePreviewSearchButton,
     editorHost,
-    openButton,
-    saveButton,
-    saveAsButton,
     settingsButton,
+    paneToolbarsToggleButton,
     dropOverlay,
     externalChangeModal,
     externalChangeMessage,
@@ -142,6 +141,6 @@ export const getAppElements = () => {
     saveSettingsButton,
     modeButtons,
     editorDirectionButtons,
+    previewWidthButtons,
   };
 };
-
