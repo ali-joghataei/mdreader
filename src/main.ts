@@ -1,37 +1,23 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
-import { execFile } from 'node:child_process';
 import { watch, type FSWatcher } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
-
-type DocumentState = {
-  filePath: string | null;
-  isDirty: boolean;
-};
-
-type AppSettings = {
-  fontFamily: string | null;
-  customizeEditorFont: boolean;
-  useEditorFont: boolean;
-  editorFontFamily: string | null;
-  themeMode: 'auto' | 'light' | 'dark';
-};
-
-type LinkedMarkdownDocument = {
-  filePath: string;
-  content: string;
-  hash: string | null;
-};
-
-type ExplorerEntry = {
-  name: string;
-  filePath: string;
-  type: 'directory' | 'markdown';
-};
-
-const markdownExtensions = new Set(['.md', '.markdown', '.mdown', '.mkd']);
+import {
+  IPC_CHANNELS,
+  type AppSettings,
+  type DocumentState,
+  type LinkedMarkdownDocument,
+  type MenuCommand,
+} from './shared/contracts';
+import { listExplorerDirectory } from './main/explorer';
+import {
+  getLinkHash,
+  getLocalLinkedMarkdownPath,
+  isMarkdownFile,
+  readMarkdownFile,
+} from './main/markdown-files';
+import { createSettingsStore } from './main/settings-store';
+import { listSystemFonts } from './main/system-fonts';
 let mainWindow: BrowserWindow | null = null;
 let documentState: DocumentState = {
   filePath: null,
@@ -42,11 +28,6 @@ let watchedFilePath: string | null = null;
 let externalChangePending = false;
 let suppressWatchUntil = 0;
 let watchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-let settingsCache: AppSettings | null = null;
-const execFileAsync = promisify(execFile);
-
-const isMarkdownFile = (filePath: string) =>
-  markdownExtensions.has(path.extname(filePath).toLowerCase());
 
 const getLaunchFilePath = () => {
   const candidate = process.argv.find((arg) => {
@@ -60,227 +41,8 @@ const getLaunchFilePath = () => {
   return candidate ?? null;
 };
 
-const readMarkdownFile = async (filePath: string) => {
-  if (!isMarkdownFile(filePath)) {
-    throw new Error('Only Markdown files can be opened.');
-  }
-
-  const content = await fs.readFile(filePath, 'utf8');
-  return {
-    filePath,
-    content,
-  };
-};
-
-const getLocalLinkedMarkdownPath = (sourceFilePath: string, href: string) => {
-  const trimmedHref = href.trim();
-  if (!trimmedHref || trimmedHref.startsWith('#')) {
-    return null;
-  }
-
-  if (/^(https?:|mailto:)/i.test(trimmedHref)) {
-    return null;
-  }
-
-  if (/^file:/i.test(trimmedHref)) {
-    return fileURLToPath(trimmedHref);
-  }
-
-  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmedHref)) {
-    return null;
-  }
-
-  const pathPart = trimmedHref.split('#', 1)[0];
-  return path.resolve(path.dirname(sourceFilePath), decodeURIComponent(pathPart));
-};
-
-const getLinkHash = (href: string) => {
-  const hashIndex = href.indexOf('#');
-  if (hashIndex === -1) {
-    return null;
-  }
-
-  return decodeURIComponent(href.slice(hashIndex + 1));
-};
-
 const getSettingsPath = () => path.join(app.getPath('userData'), 'settings.json');
-
-const readSettings = async (): Promise<AppSettings> => {
-  if (settingsCache) {
-    return settingsCache;
-  }
-
-  try {
-    const content = await fs.readFile(getSettingsPath(), 'utf8');
-    const parsed = JSON.parse(content) as Partial<AppSettings>;
-    settingsCache = {
-      fontFamily:
-        typeof parsed.fontFamily === 'string' && parsed.fontFamily.trim()
-          ? parsed.fontFamily
-          : null,
-      customizeEditorFont: parsed.customizeEditorFont === true,
-      useEditorFont: parsed.useEditorFont === true,
-      editorFontFamily:
-        typeof parsed.editorFontFamily === 'string' && parsed.editorFontFamily.trim()
-          ? parsed.editorFontFamily
-          : null,
-      themeMode:
-        parsed.themeMode === 'light' || parsed.themeMode === 'dark'
-          ? parsed.themeMode
-          : 'auto',
-    };
-  } catch {
-    settingsCache = {
-      fontFamily: null,
-      customizeEditorFont: false,
-      useEditorFont: false,
-      editorFontFamily: null,
-      themeMode: 'auto',
-    };
-  }
-
-  return settingsCache;
-};
-
-const writeSettings = async (settings: AppSettings) => {
-  settingsCache = {
-    fontFamily: settings.fontFamily?.trim() || null,
-    customizeEditorFont: settings.customizeEditorFont === true,
-    useEditorFont: settings.useEditorFont === true,
-    editorFontFamily: settings.editorFontFamily?.trim() || null,
-    themeMode:
-      settings.themeMode === 'light' || settings.themeMode === 'dark'
-        ? settings.themeMode
-        : 'auto',
-  };
-  await fs.mkdir(path.dirname(getSettingsPath()), { recursive: true });
-  await fs.writeFile(
-    getSettingsPath(),
-    `${JSON.stringify(settingsCache, null, 2)}\n`,
-    'utf8',
-  );
-
-  return settingsCache;
-};
-
-const normalizeFontName = (fontName: string) =>
-  fontName
-    .replace(/\s+\((?:OpenType|TrueType|Type 1|Raster|Vector)\)$/i, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-const uniqueSortedFonts = (fonts: string[]) =>
-  Array.from(new Set(fonts.map(normalizeFontName).filter(Boolean))).sort(
-    (first, second) => first.localeCompare(second),
-  );
-
-const listWindowsFonts = async () => {
-  const command = [
-    "$paths = @('HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts', 'HKCU:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts')",
-    'foreach ($path in $paths) {',
-    '  if (Test-Path $path) {',
-    '    (Get-ItemProperty -Path $path).PSObject.Properties |',
-    "      Where-Object { $_.Name -notlike 'PS*' } |",
-    '      ForEach-Object { $_.Name }',
-    '  }',
-    '}',
-  ].join('\n');
-
-  const { stdout } = await execFileAsync('powershell.exe', [
-    '-NoProfile',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-Command',
-    command,
-  ]);
-
-  return uniqueSortedFonts(stdout.split(/\r?\n/));
-};
-
-const collectFontNames = (value: unknown, fonts: string[]) => {
-  if (!value || typeof value !== 'object') {
-    return;
-  }
-
-  Object.entries(value as Record<string, unknown>).forEach(([key, entry]) => {
-    if (
-      (key === 'family' || key === '_name') &&
-      typeof entry === 'string' &&
-      entry.trim()
-    ) {
-      fonts.push(entry);
-    }
-
-    if (Array.isArray(entry)) {
-      entry.forEach((item) => collectFontNames(item, fonts));
-      return;
-    }
-
-    collectFontNames(entry, fonts);
-  });
-};
-
-const listMacFonts = async () => {
-  const { stdout } = await execFileAsync('system_profiler', [
-    'SPFontsDataType',
-    '-json',
-  ]);
-  const fonts: string[] = [];
-  collectFontNames(JSON.parse(stdout), fonts);
-  return uniqueSortedFonts(fonts);
-};
-
-const listLinuxFonts = async () => {
-  const { stdout } = await execFileAsync('fc-list', [':', 'family']);
-  const fonts = stdout
-    .split(/\r?\n/)
-    .flatMap((line) => line.split(','))
-    .map((font) => font.trim());
-
-  return uniqueSortedFonts(fonts);
-};
-
-const listSystemFonts = async () => {
-  if (process.platform === 'win32') {
-    return listWindowsFonts();
-  }
-
-  if (process.platform === 'darwin') {
-    return listMacFonts();
-  }
-
-  if (process.platform === 'linux') {
-    return listLinuxFonts();
-  }
-
-  return [];
-};
-
-const listExplorerDirectory = async (directoryPath: string) => {
-  const resolvedPath = path.resolve(directoryPath);
-  const entries = await fs.readdir(resolvedPath, { withFileTypes: true });
-  const filteredEntries: ExplorerEntry[] = entries
-    .filter((entry) => entry.isDirectory() || isMarkdownFile(entry.name))
-    .map((entry) => ({
-      name: entry.name,
-      filePath: path.join(resolvedPath, entry.name),
-      type: entry.isDirectory() ? 'directory' : 'markdown',
-    }));
-
-  filteredEntries.sort((first, second) => {
-    if (first.type !== second.type) {
-      return first.type === 'directory' ? -1 : 1;
-    }
-
-    return first.name.localeCompare(second.name);
-  });
-
-  return {
-    currentPath: resolvedPath,
-    parentPath: path.dirname(resolvedPath) === resolvedPath ? null : path.dirname(resolvedPath),
-    entries: filteredEntries,
-  };
-};
+const { readSettings, writeSettings } = createSettingsStore(getSettingsPath);
 
 const suppressFileWatch = (durationMs = 750) => {
   suppressWatchUntil = Date.now() + durationMs;
@@ -303,7 +65,7 @@ const notifyExternalFileChanged = () => {
     return;
   }
 
-  mainWindow.webContents.send('external-file-changed', {
+  mainWindow.webContents.send(IPC_CHANNELS.externalFileChanged, {
     filePath: documentState.filePath,
     isDirty: documentState.isDirty,
   });
@@ -381,8 +143,8 @@ const updateWindowTitle = () => {
   mainWindow.setDocumentEdited(documentState.isDirty);
 };
 
-const sendMenuCommand = (command: 'open' | 'save' | 'save-as' | 'settings') => {
-  mainWindow?.webContents.send('menu-command', command);
+const sendMenuCommand = (command: MenuCommand) => {
+  mainWindow?.webContents.send(IPC_CHANNELS.menuCommand, command);
 };
 
 const buildMenu = () => {
@@ -481,7 +243,7 @@ const createWindow = (initialFilePath: string | null) => {
 
     try {
       const document = await readMarkdownFile(initialFilePath);
-      mainWindow?.webContents.send('open-document', document);
+      mainWindow?.webContents.send(IPC_CHANNELS.openDocument, document);
       documentState = {
         filePath: document.filePath,
         isDirty: false,
@@ -497,7 +259,7 @@ const createWindow = (initialFilePath: string | null) => {
   });
 };
 
-ipcMain.handle('dialog:openMarkdown', async () => {
+ipcMain.handle(IPC_CHANNELS.openMarkdownDialog, async () => {
   if (!mainWindow) {
     return null;
   }
@@ -520,12 +282,12 @@ ipcMain.handle('dialog:openMarkdown', async () => {
   return readMarkdownFile(result.filePaths[0]);
 });
 
-ipcMain.handle('file:readMarkdown', async (_event, filePath: string) =>
+ipcMain.handle(IPC_CHANNELS.readMarkdownFile, async (_event, filePath: string) =>
   readMarkdownFile(filePath),
 );
 
 ipcMain.handle(
-  'file:openLinkedMarkdown',
+  IPC_CHANNELS.openLinkedMarkdown,
   async (_event, sourceFilePath: string, href: string): Promise<LinkedMarkdownDocument | null> => {
     if (/^(https?:|mailto:)/i.test(href)) {
       await shell.openExternal(href);
@@ -554,7 +316,7 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
-  'file:saveMarkdown',
+  IPC_CHANNELS.saveMarkdownFile,
   async (_event, filePath: string, content: string) => {
     suppressFileWatch();
     await fs.writeFile(filePath, content, 'utf8');
@@ -566,7 +328,7 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
-  'dialog:saveMarkdownAs',
+  IPC_CHANNELS.saveMarkdownFileAs,
   async (_event, content: string, suggestedPath?: string) => {
     if (!mainWindow) {
       return null;
@@ -596,7 +358,7 @@ ipcMain.handle(
   },
 );
 
-ipcMain.on('external-file-change-handled', (_event, action: 'reload' | 'keep') => {
+ipcMain.on(IPC_CHANNELS.externalFileChangeHandled, (_event, action: 'reload' | 'keep') => {
   externalChangePending = false;
 
   if (action === 'keep') {
@@ -604,23 +366,23 @@ ipcMain.on('external-file-change-handled', (_event, action: 'reload' | 'keep') =
   }
 });
 
-ipcMain.handle('settings:get', () => readSettings());
+ipcMain.handle(IPC_CHANNELS.getSettings, () => readSettings());
 
-ipcMain.handle('settings:save', (_event, settings: AppSettings) =>
+ipcMain.handle(IPC_CHANNELS.saveSettings, (_event, settings: AppSettings) =>
   writeSettings(settings),
 );
 
-ipcMain.handle('fonts:list', async () => {
+ipcMain.handle(IPC_CHANNELS.listSystemFonts, async () => {
   return listSystemFonts();
 });
 
-ipcMain.handle('explorer:listDirectory', async (_event, directoryPath: string) =>
+ipcMain.handle(IPC_CHANNELS.listExplorerDirectory, async (_event, directoryPath: string) =>
   listExplorerDirectory(directoryPath),
 );
 
-ipcMain.handle('path:dirname', (_event, filePath: string) => path.dirname(filePath));
+ipcMain.handle(IPC_CHANNELS.dirname, (_event, filePath: string) => path.dirname(filePath));
 
-ipcMain.on('document-state-changed', (_event, state: DocumentState) => {
+ipcMain.on(IPC_CHANNELS.documentStateChanged, (_event, state: DocumentState) => {
   documentState = state;
   updateWindowTitle();
 

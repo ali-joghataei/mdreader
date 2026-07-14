@@ -1,0 +1,32 @@
+@media (max-width: 820px) {
+  .toolbar {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .toolbar-actions,
+  .mode-switch {
+    justify-content: stretch;
+  }
+
+  .icon-button,
+  .mode-button {
+    flex: 1;
+  }
+
+  .workspace.split-mode {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(220px, 42%) minmax(260px, 58%);
+  }
+
+  .workspace.split-mode .editor-pane {
+    border-right: 0;
+    border-bottom: 1px solid #d8dee6;
+  }
+
+  .markdown-body {
+    width: calc(100% - 30px);
+    padding-top: 22px;
+  }
+}
+

@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "noEmit": true
+  },
+  "include": [
+    "src/renderer.ts",
+    "src/renderer/**/*.ts",
+    "src/shared/**/*.ts",
+    "src/preload.ts",
+    "src/types/**/*.d.ts"
+  ]
+}

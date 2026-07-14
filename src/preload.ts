@@ -1,103 +1,74 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-
-type MenuCommand = 'open' | 'save' | 'save-as' | 'settings';
-
-type MarkdownDocument = {
-  filePath: string;
-  content: string;
-};
-
-type LinkedMarkdownDocument = MarkdownDocument & {
-  hash: string | null;
-};
-
-type DocumentState = {
-  filePath: string | null;
-  isDirty: boolean;
-};
-
-type AppSettings = {
-  fontFamily: string | null;
-  customizeEditorFont: boolean;
-  useEditorFont: boolean;
-  editorFontFamily: string | null;
-  themeMode: 'auto' | 'light' | 'dark';
-};
-
-type ExplorerDirectory = {
-  currentPath: string;
-  parentPath: string | null;
-  entries: Array<{
-    name: string;
-    filePath: string;
-    type: 'directory' | 'markdown';
-  }>;
-};
-
-type ExternalFileChangedEvent = {
-  filePath: string;
-  isDirty: boolean;
-};
+import {
+  IPC_CHANNELS,
+  type AppSettings,
+  type DocumentState,
+  type ExplorerDirectory,
+  type ExternalFileChangedEvent,
+  type LinkedMarkdownDocument,
+  type MarkdownDocument,
+  type MenuCommand,
+} from './shared/contracts';
 
 const api = {
   openMarkdownDialog: () =>
-    ipcRenderer.invoke('dialog:openMarkdown') as Promise<MarkdownDocument | null>,
+    ipcRenderer.invoke(IPC_CHANNELS.openMarkdownDialog) as Promise<MarkdownDocument | null>,
   readMarkdownFile: (filePath: string) =>
-    ipcRenderer.invoke('file:readMarkdown', filePath) as Promise<MarkdownDocument>,
+    ipcRenderer.invoke(IPC_CHANNELS.readMarkdownFile, filePath) as Promise<MarkdownDocument>,
   openLinkedMarkdown: (sourceFilePath: string, href: string) =>
     ipcRenderer.invoke(
-      'file:openLinkedMarkdown',
+      IPC_CHANNELS.openLinkedMarkdown,
       sourceFilePath,
       href,
     ) as Promise<LinkedMarkdownDocument | null>,
   saveMarkdownFile: (filePath: string, content: string) =>
     ipcRenderer.invoke(
-      'file:saveMarkdown',
+      IPC_CHANNELS.saveMarkdownFile,
       filePath,
       content,
     ) as Promise<MarkdownDocument>,
   saveMarkdownFileAs: (content: string, suggestedPath?: string) =>
     ipcRenderer.invoke(
-      'dialog:saveMarkdownAs',
+      IPC_CHANNELS.saveMarkdownFileAs,
       content,
       suggestedPath,
     ) as Promise<MarkdownDocument | null>,
   setDocumentState: (state: DocumentState) => {
-    ipcRenderer.send('document-state-changed', state);
+    ipcRenderer.send(IPC_CHANNELS.documentStateChanged, state);
   },
-  getSettings: () => ipcRenderer.invoke('settings:get') as Promise<AppSettings>,
+  getSettings: () => ipcRenderer.invoke(IPC_CHANNELS.getSettings) as Promise<AppSettings>,
   saveSettings: (settings: AppSettings) =>
-    ipcRenderer.invoke('settings:save', settings) as Promise<AppSettings>,
-  listSystemFonts: () => ipcRenderer.invoke('fonts:list') as Promise<string[]>,
+    ipcRenderer.invoke(IPC_CHANNELS.saveSettings, settings) as Promise<AppSettings>,
+  listSystemFonts: () => ipcRenderer.invoke(IPC_CHANNELS.listSystemFonts) as Promise<string[]>,
   listExplorerDirectory: (directoryPath: string) =>
     ipcRenderer.invoke(
-      'explorer:listDirectory',
+      IPC_CHANNELS.listExplorerDirectory,
       directoryPath,
     ) as Promise<ExplorerDirectory>,
-  dirname: (filePath: string) => ipcRenderer.invoke('path:dirname', filePath) as Promise<string>,
+  dirname: (filePath: string) => ipcRenderer.invoke(IPC_CHANNELS.dirname, filePath) as Promise<string>,
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   onOpenDocument: (callback: (document: MarkdownDocument) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, document: MarkdownDocument) =>
       callback(document);
-    ipcRenderer.on('open-document', listener);
-    return () => ipcRenderer.off('open-document', listener);
+    ipcRenderer.on(IPC_CHANNELS.openDocument, listener);
+    return () => ipcRenderer.off(IPC_CHANNELS.openDocument, listener);
   },
   onMenuCommand: (callback: (command: MenuCommand) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, command: MenuCommand) =>
       callback(command);
-    ipcRenderer.on('menu-command', listener);
-    return () => ipcRenderer.off('menu-command', listener);
+    ipcRenderer.on(IPC_CHANNELS.menuCommand, listener);
+    return () => ipcRenderer.off(IPC_CHANNELS.menuCommand, listener);
   },
   onExternalFileChanged: (callback: (event: ExternalFileChangedEvent) => void) => {
     const listener = (
       _event: Electron.IpcRendererEvent,
       payload: ExternalFileChangedEvent,
     ) => callback(payload);
-    ipcRenderer.on('external-file-changed', listener);
-    return () => ipcRenderer.off('external-file-changed', listener);
+    ipcRenderer.on(IPC_CHANNELS.externalFileChanged, listener);
+    return () => ipcRenderer.off(IPC_CHANNELS.externalFileChanged, listener);
   },
   acknowledgeExternalFileChange: (action: 'reload' | 'keep') => {
-    ipcRenderer.send('external-file-change-handled', action);
+    ipcRenderer.send(IPC_CHANNELS.externalFileChangeHandled, action);
   },
 };
 
