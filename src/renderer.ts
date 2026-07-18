@@ -39,6 +39,7 @@ import {
 } from './renderer/mermaid-viewer';
 import { appTemplate } from './renderer/app-template';
 import { getAppElements } from './renderer/dom';
+import { parseFrontMatter, renderFrontMatter } from './renderer/front-matter';
 import { getTextDirection } from './renderer/text-direction';
 import type {
   AppSettings,
@@ -652,7 +653,8 @@ const syncDocumentState = () => {
 
 const renderPreview = () => {
   const renderSerial = ++previewRenderSerial;
-  const rawHtml = markdownParser.render(currentContent);
+  const { body, attributes } = parseFrontMatter(currentContent);
+  const rawHtml = `${renderFrontMatter(attributes)}${markdownParser.render(body)}`;
   preview.innerHTML = DOMPurify.sanitize(rawHtml, {
     ADD_ATTR: ['target', 'rel', 'class', 'data-mermaid-source'],
   });
