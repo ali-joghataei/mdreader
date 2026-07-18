@@ -43,6 +43,7 @@ import { getTextDirection } from './renderer/text-direction';
 import type {
   AppSettings,
   ExplorerDirectory,
+  ExportFormat,
   LinkedMarkdownDocument,
   MarkdownDocument,
   MenuCommand,
@@ -155,6 +156,7 @@ const blockDirectionSelector = [
 
 let previewRenderSerial = 0;
 let mermaidPromise: Promise<typeof import('mermaid').default> | null = null;
+let previewRenderPromise: Promise<void> = Promise.resolve();
 
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -656,7 +658,7 @@ const renderPreview = () => {
   });
 
   applyPreviewDirection();
-  void renderMermaidDiagrams(renderSerial).catch(showOpenError);
+  previewRenderPromise = renderMermaidDiagrams(renderSerial).catch(showOpenError);
 
   preview.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((link) => {
     const href = link.getAttribute('href');
@@ -858,6 +860,157 @@ const saveAs = async () => {
     savedContent = document.content;
     currentFilePath = document.filePath;
     syncDocumentState();
+  }
+};
+
+const blobToDataUrl = (blob: Blob) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => resolve(String(reader.result)));
+    reader.addEventListener('error', () => reject(reader.error));
+    reader.readAsDataURL(blob);
+  });
+
+const getExportCss = async () => {
+  const styleSheets = Array.from(document.styleSheets);
+  const chunks: string[] = [];
+
+  for (const styleSheet of styleSheets) {
+    try {
+      chunks.push(Array.from(styleSheet.cssRules).map((rule) => rule.cssText).join('\n'));
+    } catch {
+      // A cross-origin stylesheet cannot be read and is not required for local exports.
+    }
+  }
+
+  let css = chunks.join('\n');
+  const urls = Array.from(css.matchAll(/url\((['"]?)([^)'"\s]+)\1\)/g));
+  const replacements = new Map<string, string>();
+  for (const match of urls) {
+    const source = match[2];
+    if (/^(?:data:|#)/i.test(source) || replacements.has(source)) {
+      continue;
+    }
+    try {
+      const response = await fetch(new URL(source, document.baseURI));
+      if (response.ok) {
+        replacements.set(source, await blobToDataUrl(await response.blob()));
+      }
+    } catch {
+      // Keep an unresolved optional asset reference as-is.
+    }
+  }
+  replacements.forEach((replacement, source) => {
+    css = css.split(source).join(replacement);
+  });
+
+  const readerFont = getComputedStyle(document.documentElement)
+    .getPropertyValue('--reader-font-family')
+    .trim();
+  return `${css}\n:root { --reader-font-family: ${readerFont || defaultFontStack}; }\nhtml, body { width: auto; height: auto; overflow: visible; background: #fff; color: #24292f; }\nbody { padding: 0 24px; }\n.markdown-body { width: min(900px, calc(100% - 44px)); min-height: 0; }\n.mermaid-open-button, .header-anchor { display: none !important; }`;
+};
+
+const rasterizeMermaidDiagrams = async (container: HTMLElement) => {
+  const diagrams = Array.from(container.querySelectorAll<SVGSVGElement>('.mermaid-diagram svg'));
+  await Promise.all(diagrams.map(async (svg) => {
+    const viewBox = svg.viewBox.baseVal;
+    const width = Math.max(1, Math.ceil(viewBox.width || svg.getBoundingClientRect().width || 800));
+    const height = Math.max(1, Math.ceil(viewBox.height || svg.getBoundingClientRect().height || 450));
+    const source = new XMLSerializer().serializeToString(svg);
+    const image = new Image();
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`;
+    await image.decode();
+    const scale = Math.min(2, 1600 / width);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(width * scale);
+    canvas.height = Math.ceil(height * scale);
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const replacement = document.createElement('img');
+    replacement.src = canvas.toDataURL('image/png');
+    replacement.alt = 'Mermaid diagram';
+    replacement.width = width;
+    replacement.height = height;
+    svg.replaceWith(replacement);
+  }));
+};
+
+const getTableName = (table: HTMLTableElement, index: number) => {
+  const caption = table.querySelector('caption')?.textContent?.trim();
+  if (caption) return caption;
+  let previous = table.previousElementSibling;
+  while (previous) {
+    if (/^H[1-6]$/.test(previous.tagName)) {
+      const heading = previous.textContent?.replace(/#\s*$/, '').trim();
+      if (heading) return heading;
+    }
+    previous = previous.previousElementSibling;
+  }
+  return `Table ${index + 1}`;
+};
+
+const tableToRows = (table: HTMLTableElement) => {
+  const grid: string[][] = [];
+  Array.from(table.rows).forEach((row, rowIndex) => {
+    grid[rowIndex] ??= [];
+    let columnIndex = 0;
+    Array.from(row.cells).forEach((cell) => {
+      while (grid[rowIndex][columnIndex] !== undefined) columnIndex += 1;
+      const value = cell.innerText.trim();
+      const rowSpan = Math.max(1, cell.rowSpan);
+      const columnSpan = Math.max(1, cell.colSpan);
+      for (let rowOffset = 0; rowOffset < rowSpan; rowOffset += 1) {
+        grid[rowIndex + rowOffset] ??= [];
+        for (let columnOffset = 0; columnOffset < columnSpan; columnOffset += 1) {
+          grid[rowIndex + rowOffset][columnIndex + columnOffset] =
+            rowOffset === 0 && columnOffset === 0 ? value : '';
+        }
+      }
+      columnIndex += columnSpan;
+    });
+  });
+  const width = grid.reduce((maximum, row) => Math.max(maximum, row.length), 0);
+  return grid.map((row) => Array.from({ length: width }, (_, index) => row[index] ?? ''));
+};
+
+const createExportSnapshot = async (format: ExportFormat) => {
+  await previewRenderPromise;
+  const clone = preview.cloneNode(true) as HTMLElement;
+  clone.removeAttribute('id');
+  clone.querySelectorAll('.mermaid-open-button, .header-anchor').forEach((element) => element.remove());
+  clone.querySelectorAll('mark.preview-search-match').forEach((mark) => {
+    mark.replaceWith(document.createTextNode(mark.textContent ?? ''));
+  });
+  if (format === 'docx' || format === 'epub') {
+    await rasterizeMermaidDiagrams(clone);
+  }
+
+  const plainClone = clone.cloneNode(true) as HTMLElement;
+  plainClone.querySelectorAll('style, script').forEach((element) => element.remove());
+  const tables = Array.from(preview.querySelectorAll<HTMLTableElement>('table')).map(
+    (table, index) => ({ name: getTableName(table, index), rows: tableToRows(table) }),
+  );
+
+  return {
+    format,
+    title: getBaseName(currentFilePath).replace(/\.[^.]+$/, ''),
+    sourceFilePath: currentFilePath,
+    html: new XMLSerializer().serializeToString(clone),
+    css: await getExportCss(),
+    plainText: `${plainClone.innerText.trim()}\n`,
+    tables,
+  };
+};
+
+const exportCurrentDocument = async (format: ExportFormat) => {
+  try {
+    await window.mdReader.exportDocument(await createExportSnapshot(format));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await window.mdReader.showErrorMessage('Could not export document', message);
   }
 };
 
@@ -1471,6 +1624,10 @@ window.mdReader.onMenuCommand((command: MenuCommand) => {
 
   if (command === 'reset-zoom') {
     resetContentZoom();
+  }
+
+  if (command.startsWith('export:')) {
+    void exportCurrentDocument(command.slice('export:'.length) as ExportFormat);
   }
 });
 

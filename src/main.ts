@@ -9,6 +9,7 @@ import {
   type LinkedMarkdownDocument,
   type MenuCommand,
 } from './shared/contracts';
+import { exportDocument, type ExportDocument } from './export';
 import { listExplorerDirectory } from './main/explorer';
 import {
   getLinkHash,
@@ -166,6 +167,20 @@ const buildMenu = () => {
           label: 'Save As...',
           accelerator: 'CmdOrCtrl+Shift+S',
           click: () => sendMenuCommand('save-as'),
+        },
+        { type: 'separator' },
+        {
+          label: 'Export',
+          submenu: [
+            { label: 'Word Document (.docx)...', click: () => sendMenuCommand('export:docx') },
+            { label: 'PDF Document (.pdf)...', click: () => sendMenuCommand('export:pdf') },
+            { label: 'HTML Document (.html)...', click: () => sendMenuCommand('export:html') },
+            { label: 'Plain Text (.txt)...', click: () => sendMenuCommand('export:txt') },
+            { label: 'EPUB eBook (.epub)...', click: () => sendMenuCommand('export:epub') },
+            { type: 'separator' },
+            { label: 'Excel Workbook (.xlsx)...', click: () => sendMenuCommand('export:xlsx') },
+            { label: 'CSV Table(s) (.csv)...', click: () => sendMenuCommand('export:csv') },
+          ],
         },
         { type: 'separator' },
         {
@@ -390,6 +405,26 @@ ipcMain.handle(IPC_CHANNELS.listExplorerDirectory, async (_event, directoryPath:
 );
 
 ipcMain.handle(IPC_CHANNELS.dirname, (_event, filePath: string) => path.dirname(filePath));
+
+ipcMain.handle('document:export', async (_event, document: ExportDocument) => {
+  if (!mainWindow) {
+    return { canceled: true, filePaths: [] };
+  }
+
+  return exportDocument(mainWindow, document);
+});
+
+ipcMain.handle('dialog:showError', async (_event, title: string, message: string) => {
+  if (!mainWindow) {
+    return;
+  }
+
+  await dialog.showMessageBox(mainWindow, {
+    type: 'error',
+    title,
+    message,
+  });
+});
 
 ipcMain.on(IPC_CHANNELS.documentStateChanged, (_event, state: DocumentState) => {
   documentState = state;

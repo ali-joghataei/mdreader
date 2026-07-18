@@ -4,11 +4,32 @@ import {
   type AppSettings,
   type DocumentState,
   type ExplorerDirectory,
+  type ExportFormat,
   type ExternalFileChangedEvent,
   type LinkedMarkdownDocument,
   type MarkdownDocument,
   type MenuCommand,
 } from './shared/contracts';
+
+type ExportTable = {
+  name: string;
+  rows: string[][];
+};
+
+type ExportDocument = {
+  format: ExportFormat;
+  title: string;
+  sourceFilePath: string | null;
+  html: string;
+  css: string;
+  plainText: string;
+  tables: ExportTable[];
+};
+
+type ExportResult = {
+  canceled: boolean;
+  filePaths: string[];
+};
 
 const api = {
   openMarkdownDialog: () =>
@@ -33,6 +54,10 @@ const api = {
       content,
       suggestedPath,
     ) as Promise<MarkdownDocument | null>,
+  exportDocument: (document: ExportDocument) =>
+    ipcRenderer.invoke('document:export', document) as Promise<ExportResult>,
+  showErrorMessage: (title: string, message: string) =>
+    ipcRenderer.invoke('dialog:showError', title, message) as Promise<void>,
   setDocumentState: (state: DocumentState) => {
     ipcRenderer.send(IPC_CHANNELS.documentStateChanged, state);
   },

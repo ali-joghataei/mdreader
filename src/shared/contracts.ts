@@ -1,5 +1,7 @@
 export type ViewMode = 'preview' | 'edit' | 'split';
 
+export type ExportFormat = 'docx' | 'pdf' | 'html' | 'txt' | 'epub' | 'xlsx' | 'csv';
+
 export type MenuCommand =
   | 'open'
   | 'save'
@@ -7,7 +9,8 @@ export type MenuCommand =
   | 'settings'
   | 'zoom-in'
   | 'zoom-out'
-  | 'reset-zoom';
+  | 'reset-zoom'
+  | `export:${ExportFormat}`;
 
 export type MarkdownDocument = {
   filePath: string;
