@@ -18,6 +18,54 @@
     flex: 0 0 34px;
   }
 
+  .sidebar-toggle,
+  .toc-toggle {
+    justify-self: start;
+  }
+
+  .content-shell.sidebar-open.toc-open {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(140px, 30%) minmax(0, 1fr) minmax(140px, 30%);
+  }
+
+  .content-shell.sidebar-open:not(.toc-open),
+  .content-shell.toc-open:not(.sidebar-open) {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(140px, 30%) minmax(0, 1fr);
+  }
+
+  .content-shell:not(.sidebar-open):not(.toc-open) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .file-sidebar,
+  .toc-sidebar {
+    display: none;
+  }
+
+  .sidebar-resizer {
+    display: none !important;
+  }
+
+  .content-shell.sidebar-open .file-sidebar,
+  .content-shell.toc-open .toc-sidebar {
+    display: block;
+  }
+
+  .content-shell.sidebar-open:not(.toc-open) .workspace {
+    grid-row: 2;
+  }
+
+  .content-shell.toc-open:not(.sidebar-open) .toc-sidebar {
+    grid-row: 2;
+  }
+
+  .file-sidebar,
+  .toc-sidebar {
+    border: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
   .workspace.split-mode {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(220px, 42%) minmax(260px, 58%);

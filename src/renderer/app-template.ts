@@ -16,6 +16,7 @@ export const appTemplate = `
         <button class="mode-button" data-mode="edit" role="tab" aria-selected="false"><i data-lucide="pencil"></i><span>Edit</span></button>
         <button class="mode-button" data-mode="split" role="tab" aria-selected="false"><i data-lucide="columns-2"></i><span>Split</span></button>
       </div>
+      <button class="icon-button toc-toggle icon-only-button" id="tocToggleButton" title="Toggle table of contents" aria-label="Toggle table of contents" aria-expanded="false"><i data-lucide="panel-right"></i></button>
     </header>
     <main class="content-shell">
       <aside class="file-sidebar" id="fileSidebar" aria-label="File explorer">
@@ -27,6 +28,7 @@ export const appTemplate = `
         </div>
         <div class="file-tree" id="fileTree"></div>
       </aside>
+      <div class="sidebar-resizer file-sidebar-resizer" id="fileSidebarResizer" role="separator" aria-label="Resize file explorer" aria-orientation="vertical"></div>
       <section class="workspace preview-mode" id="workspace">
         <section class="pane editor-pane" aria-label="Markdown editor">
           <div class="editor-toolbar">
@@ -68,6 +70,15 @@ export const appTemplate = `
           </div>
         </section>
       </section>
+      <aside class="toc-sidebar" id="tocSidebar" aria-label="Table of contents">
+        <div class="sidebar-header">
+          <div class="sidebar-title">Table of Contents</div>
+        </div>
+        <nav class="toc-list" id="tocList" aria-label="Document headings">
+          <div class="toc-empty">No headings</div>
+        </nav>
+      </aside>
+      <div class="sidebar-resizer toc-sidebar-resizer" id="tocSidebarResizer" role="separator" aria-label="Resize table of contents" aria-orientation="vertical"></div>
       <div class="drop-overlay" id="dropOverlay">Drop Markdown file to open</div>
     </main>
     <div class="settings-modal external-change-modal" id="externalChangeModal" hidden>

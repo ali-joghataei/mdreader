@@ -13,6 +13,7 @@ import {
   Folder,
   Maximize2,
   PanelLeft,
+  PanelRight,
   Pencil,
   Settings,
   SlidersHorizontal,
@@ -174,6 +175,7 @@ const lucideIcons = {
   Folder,
   Maximize2,
   PanelLeft,
+  PanelRight,
   Pencil,
   Settings,
   SlidersHorizontal,
@@ -190,6 +192,10 @@ const {
   sidebarToggleButton,
   sidebarPath,
   fileTree,
+  fileSidebarResizer,
+  tocToggleButton,
+  tocList,
+  tocSidebarResizer,
   editorPane,
   previewPane,
   preview,
@@ -231,6 +237,7 @@ let fontsLoaded = false;
 let fontsLoadingPromise: Promise<void> | null = null;
 let explorerDirectoryPath: string | null = null;
 let isSidebarOpen = false;
+let isTocOpen = false;
 let editorDirection: 'ltr' | 'rtl' = 'ltr';
 let previewWidthMode: 'reader' | 'wide' = 'reader';
 let arePaneToolbarsVisible = true;
@@ -240,6 +247,44 @@ let previewSearchIndex = -1;
 let previewSearchRestoreFocus: HTMLElement | null = null;
 let activeWorkspacePane: 'editor' | 'preview' = 'preview';
 let dropOverlayHideTimer: number | null = null;
+
+const uiStateStorageKey = 'mdreader:ui-state';
+
+type PersistedUiState = {
+  isSidebarOpen: boolean;
+  isTocOpen: boolean;
+  arePaneToolbarsVisible: boolean;
+};
+
+const saveUiState = () => {
+  const state: PersistedUiState = {
+    isSidebarOpen,
+    isTocOpen,
+    arePaneToolbarsVisible,
+  };
+
+  try {
+    window.localStorage.setItem(uiStateStorageKey, JSON.stringify(state));
+  } catch {
+    // The UI remains usable when persistent storage is unavailable.
+  }
+};
+
+const loadUiState = (): Partial<PersistedUiState> => {
+  try {
+    const storedState = window.localStorage.getItem(uiStateStorageKey);
+    if (!storedState) {
+      return {};
+    }
+
+    const parsedState: unknown = JSON.parse(storedState);
+    return parsedState && typeof parsedState === 'object'
+      ? (parsedState as Partial<PersistedUiState>)
+      : {};
+  } catch {
+    return {};
+  }
+};
 
 const editorTheme = new Compartment();
 const editor = new EditorView({
@@ -651,6 +696,50 @@ const syncDocumentState = () => {
   });
 };
 
+const renderTableOfContents = () => {
+  const headings = Array.from(
+    preview.querySelectorAll<HTMLHeadingElement>('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]'),
+  );
+  tocList.replaceChildren();
+
+  if (headings.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'toc-empty';
+    empty.textContent = 'No headings';
+    tocList.append(empty);
+    return;
+  }
+
+  headings.forEach((heading) => {
+    const labelSource = heading.cloneNode(true) as HTMLElement;
+    labelSource.querySelectorAll('.header-anchor').forEach((anchor) => anchor.remove());
+
+    const link = document.createElement('a');
+    link.className = 'toc-item';
+    link.href = `#${encodeURIComponent(heading.id)}`;
+    link.textContent = labelSource.textContent?.trim() || heading.id;
+    link.title = link.textContent;
+    const direction =
+      heading.dir === 'rtl' || heading.dir === 'ltr'
+        ? heading.dir
+        : getTextDirection(link.textContent);
+    if (direction) {
+      link.dir = direction;
+    }
+    link.style.paddingInlineStart = `${9 + (Number(heading.tagName.slice(1)) - 1) * 14}px`;
+    link.addEventListener('click', (event) => {
+      event.preventDefault();
+      if (mode === 'edit') {
+        setMode('preview');
+      }
+      window.requestAnimationFrame(() => {
+        heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+    tocList.append(link);
+  });
+};
+
 const renderPreview = () => {
   const renderSerial = ++previewRenderSerial;
   const { body, attributes } = parseFrontMatter(currentContent);
@@ -660,6 +749,7 @@ const renderPreview = () => {
   });
 
   applyPreviewDirection();
+  renderTableOfContents();
   previewRenderPromise = renderMermaidDiagrams(renderSerial).catch(showOpenError);
 
   preview.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((link) => {
@@ -1214,10 +1304,24 @@ const setExplorerToCurrentFile = async () => {
   await loadExplorerDirectory(directoryPath);
 };
 
-const setSidebarOpen = (isOpen: boolean) => {
+const setSidebarOpen = (isOpen: boolean, persist = true) => {
   isSidebarOpen = isOpen;
   contentShell.classList.toggle('sidebar-open', isSidebarOpen);
+  sidebarToggleButton.classList.toggle('active', isSidebarOpen);
   sidebarToggleButton.setAttribute('aria-expanded', String(isSidebarOpen));
+  if (persist) {
+    saveUiState();
+  }
+};
+
+const setTocOpen = (isOpen: boolean, persist = true) => {
+  isTocOpen = isOpen;
+  contentShell.classList.toggle('toc-open', isTocOpen);
+  tocToggleButton.classList.toggle('active', isTocOpen);
+  tocToggleButton.setAttribute('aria-expanded', String(isTocOpen));
+  if (persist) {
+    saveUiState();
+  }
 };
 
 const setEditorDirection = (direction: 'ltr' | 'rtl') => {
@@ -1240,12 +1344,86 @@ const setPreviewWidthMode = (widthMode: 'reader' | 'wide') => {
   });
 };
 
-const setPaneToolbarsVisible = (isVisible: boolean) => {
+const setPaneToolbarsVisible = (isVisible: boolean, persist = true) => {
   arePaneToolbarsVisible = isVisible;
   workspace.classList.toggle('pane-toolbars-hidden', !arePaneToolbarsVisible);
   paneToolbarsToggleButton.setAttribute('aria-pressed', String(arePaneToolbarsVisible));
   paneToolbarsToggleButton.classList.toggle('active', arePaneToolbarsVisible);
+  if (persist) {
+    saveUiState();
+  }
 };
+
+const restoreUiState = () => {
+  const state = loadUiState();
+  setSidebarOpen(
+    typeof state.isSidebarOpen === 'boolean' ? state.isSidebarOpen : false,
+    false,
+  );
+  setTocOpen(typeof state.isTocOpen === 'boolean' ? state.isTocOpen : false, false);
+  setPaneToolbarsVisible(
+    typeof state.arePaneToolbarsVisible === 'boolean'
+      ? state.arePaneToolbarsVisible
+      : true,
+    false,
+  );
+};
+
+const enableSidebarResize = (
+  handle: HTMLDivElement,
+  side: 'left' | 'right',
+) => {
+  handle.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    handle.classList.add('is-resizing');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const resize = (pointerEvent: PointerEvent) => {
+      const bounds = contentShell.getBoundingClientRect();
+      const oppositeWidth =
+        side === 'left' && isTocOpen
+          ? Number.parseFloat(getComputedStyle(contentShell).getPropertyValue('--toc-sidebar-width'))
+          : side === 'right' && isSidebarOpen
+            ? Number.parseFloat(getComputedStyle(contentShell).getPropertyValue('--file-sidebar-width'))
+            : 0;
+      const requestedWidth =
+        side === 'left'
+          ? pointerEvent.clientX - bounds.left
+          : bounds.right - pointerEvent.clientX;
+      const maximumWidth = Math.max(180, Math.min(520, bounds.width - oppositeWidth - 320));
+      const width = Math.min(maximumWidth, Math.max(180, requestedWidth));
+      contentShell.style.setProperty(
+        side === 'left' ? '--file-sidebar-width' : '--toc-sidebar-width',
+        `${Math.round(width)}px`,
+      );
+    };
+
+    const stopResize = () => {
+      handle.classList.remove('is-resizing');
+      document.body.style.removeProperty('cursor');
+      document.body.style.removeProperty('user-select');
+      handle.removeEventListener('pointermove', resize);
+      handle.removeEventListener('pointerup', stopResize);
+      handle.removeEventListener('pointercancel', stopResize);
+      handle.removeEventListener('lostpointercapture', stopResize);
+    };
+
+    handle.addEventListener('pointermove', resize);
+    handle.addEventListener('pointerup', stopResize);
+    handle.addEventListener('pointercancel', stopResize);
+    handle.addEventListener('lostpointercapture', stopResize);
+  });
+};
+
+enableSidebarResize(fileSidebarResizer, 'left');
+enableSidebarResize(tocSidebarResizer, 'right');
+restoreUiState();
 
 const clampContentZoom = (zoom: number) =>
   Math.min(contentZoomMax, Math.max(contentZoomMin, Number(zoom.toFixed(2))));
@@ -1503,6 +1681,10 @@ sidebarToggleButton.addEventListener('click', () => {
   if (isSidebarOpen && !explorerDirectoryPath) {
     void setExplorerToCurrentFile().catch(showOpenError);
   }
+});
+
+tocToggleButton.addEventListener('click', () => {
+  setTocOpen(!isTocOpen);
 });
 
 window

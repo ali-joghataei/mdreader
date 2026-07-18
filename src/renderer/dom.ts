@@ -9,6 +9,14 @@ export const getAppElements = () => {
   const fileSidebar = document.querySelector<HTMLElement>('#fileSidebar');
   const sidebarPath = document.querySelector<HTMLDivElement>('#sidebarPath');
   const fileTree = document.querySelector<HTMLDivElement>('#fileTree');
+  const fileSidebarResizer =
+    document.querySelector<HTMLDivElement>('#fileSidebarResizer');
+  const tocToggleButton =
+    document.querySelector<HTMLButtonElement>('#tocToggleButton');
+  const tocSidebar = document.querySelector<HTMLElement>('#tocSidebar');
+  const tocList = document.querySelector<HTMLElement>('#tocList');
+  const tocSidebarResizer =
+    document.querySelector<HTMLDivElement>('#tocSidebarResizer');
   const editorPane = document.querySelector<HTMLElement>('.editor-pane');
   const previewPane = document.querySelector<HTMLElement>('.preview-pane');
   const preview = document.querySelector<HTMLElement>('#preview');
@@ -68,6 +76,11 @@ export const getAppElements = () => {
     !fileSidebar ||
     !sidebarPath ||
     !fileTree ||
+    !fileSidebarResizer ||
+    !tocToggleButton ||
+    !tocSidebar ||
+    !tocList ||
+    !tocSidebarResizer ||
     !workspace ||
     !editorPane ||
     !previewPane ||
@@ -112,6 +125,11 @@ export const getAppElements = () => {
     fileSidebar,
     sidebarPath,
     fileTree,
+    fileSidebarResizer,
+    tocToggleButton,
+    tocSidebar,
+    tocList,
+    tocSidebarResizer,
     editorPane,
     previewPane,
     preview,
