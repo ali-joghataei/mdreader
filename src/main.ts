@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
+import { createHash } from 'node:crypto';
 import { watch, type FSWatcher } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -26,9 +27,34 @@ let documentState: DocumentState = {
 };
 let fileWatcher: FSWatcher | null = null;
 let watchedFilePath: string | null = null;
+let watchedFileHash: string | null = null;
 let externalChangePending = false;
 let suppressWatchUntil = 0;
 let watchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+const knownFileHashes = new Map<string, string>();
+
+const getFileKey = (filePath: string) => {
+  const resolvedPath = path.resolve(filePath);
+  return process.platform === 'win32' ? resolvedPath.toLowerCase() : resolvedPath;
+};
+
+const hashContent = (content: string | Buffer) =>
+  createHash('sha256').update(content).digest('hex');
+
+const rememberFileContent = (filePath: string, content: string) => {
+  const hash = hashContent(content);
+  knownFileHashes.set(getFileKey(filePath), hash);
+
+  if (getFileKey(filePath) === (watchedFilePath ? getFileKey(watchedFilePath) : null)) {
+    watchedFileHash = hash;
+  }
+};
+
+const readTrackedMarkdownFile = async (filePath: string) => {
+  const document = await readMarkdownFile(filePath);
+  rememberFileContent(document.filePath, document.content);
+  return document;
+};
 
 const getLaunchFilePath = () => {
   const candidate = process.argv.find((arg) => {
@@ -58,6 +84,7 @@ const stopFileWatcher = () => {
   fileWatcher?.close();
   fileWatcher = null;
   watchedFilePath = null;
+  watchedFileHash = null;
   externalChangePending = false;
 };
 
@@ -85,6 +112,33 @@ const markExternalFileChanged = () => {
   }
 };
 
+const checkForExternalFileChange = async (filePath: string) => {
+  try {
+    const content = await fs.readFile(filePath);
+
+    if (filePath !== watchedFilePath) {
+      return;
+    }
+
+    const currentHash = hashContent(content);
+    if (watchedFileHash === null) {
+      watchedFileHash = currentHash;
+      knownFileHashes.set(getFileKey(filePath), currentHash);
+      return;
+    }
+
+    if (currentHash === watchedFileHash) {
+      return;
+    }
+
+    watchedFileHash = currentHash;
+    knownFileHashes.set(getFileKey(filePath), currentHash);
+    markExternalFileChanged();
+  } catch {
+    // A transient read failure must not produce an external-change prompt.
+  }
+};
+
 const startFileWatcher = (filePath: string | null) => {
   if (filePath === watchedFilePath) {
     return;
@@ -97,6 +151,7 @@ const startFileWatcher = (filePath: string | null) => {
   }
 
   watchedFilePath = filePath;
+  watchedFileHash = knownFileHashes.get(getFileKey(filePath)) ?? null;
 
   try {
     fileWatcher = watch(filePath, { persistent: false }, (eventType) => {
@@ -114,7 +169,7 @@ const startFileWatcher = (filePath: string | null) => {
 
       watchDebounceTimer = setTimeout(() => {
         watchDebounceTimer = null;
-        markExternalFileChanged();
+        void checkForExternalFileChange(filePath);
       }, 200);
     });
   } catch {
@@ -266,7 +321,7 @@ const createWindow = (initialFilePath: string | null) => {
     }
 
     try {
-      const document = await readMarkdownFile(initialFilePath);
+      const document = await readTrackedMarkdownFile(initialFilePath);
       mainWindow?.webContents.send(IPC_CHANNELS.openDocument, document);
       documentState = {
         filePath: document.filePath,
@@ -303,11 +358,11 @@ ipcMain.handle(IPC_CHANNELS.openMarkdownDialog, async () => {
     return null;
   }
 
-  return readMarkdownFile(result.filePaths[0]);
+  return readTrackedMarkdownFile(result.filePaths[0]);
 });
 
 ipcMain.handle(IPC_CHANNELS.readMarkdownFile, async (_event, filePath: string) =>
-  readMarkdownFile(filePath),
+  readTrackedMarkdownFile(filePath),
 );
 
 ipcMain.handle(
@@ -319,7 +374,7 @@ ipcMain.handle(
     }
 
     if (href.startsWith('#')) {
-      const document = await readMarkdownFile(sourceFilePath);
+      const document = await readTrackedMarkdownFile(sourceFilePath);
       return {
         ...document,
         hash: getLinkHash(href),
@@ -344,6 +399,7 @@ ipcMain.handle(
   async (_event, filePath: string, content: string) => {
     suppressFileWatch();
     await fs.writeFile(filePath, content, 'utf8');
+    rememberFileContent(filePath, content);
     return {
       filePath,
       content,
@@ -375,6 +431,7 @@ ipcMain.handle(
 
     suppressFileWatch();
     await fs.writeFile(result.filePath, content, 'utf8');
+    rememberFileContent(result.filePath, content);
     return {
       filePath: result.filePath,
       content,
