@@ -11,13 +11,15 @@ import {
   type MenuCommand,
 } from './shared/contracts';
 import { exportDocument, type ExportDocument } from './export';
+import { cleanupClipboardExports } from './main/clipboard-files';
 import { listExplorerDirectory } from './main/explorer';
 import {
   getLinkHash,
-  getLocalLinkedMarkdownPath,
+  getLocalLinkedTarget,
   isMarkdownFile,
   readMarkdownFile,
 } from './main/markdown-files';
+import { openLinkedFile } from './main/open-linked-file';
 import { createSettingsStore } from './main/settings-store';
 import { listSystemFonts } from './main/system-fonts';
 let mainWindow: BrowserWindow | null = null;
@@ -204,6 +206,16 @@ const sendMenuCommand = (command: MenuCommand) => {
 };
 
 const buildMenu = () => {
+  const exportFormats = [
+    ['docx', 'Word Document (.docx)'], ['pdf', 'PDF Document (.pdf)'],
+    ['html', 'HTML Document (.html)'], ['txt', 'Plain Text (.txt)'],
+    ['epub', 'EPUB eBook (.epub)'], ['xlsx', 'Excel Workbook (.xlsx)'],
+    ['csv', 'CSV Table(s) (.csv)'],
+  ] as const;
+  const exportSubmenu = (clipboard: boolean): Electron.MenuItemConstructorOptions[] => exportFormats.flatMap(([format, label]) => [
+    ...(format === 'xlsx' ? [{ type: 'separator' as const }] : []),
+    { label: `${label}${clipboard ? '' : '...'}`, click: () => sendMenuCommand(`${clipboard ? 'copy-file' : 'export'}:${format}`) },
+  ]);
   const template: Electron.MenuItemConstructorOptions[] = [
     {
       label: 'File',
@@ -225,17 +237,13 @@ const buildMenu = () => {
         },
         { type: 'separator' },
         {
-          label: 'Export',
-          submenu: [
-            { label: 'Word Document (.docx)...', click: () => sendMenuCommand('export:docx') },
-            { label: 'PDF Document (.pdf)...', click: () => sendMenuCommand('export:pdf') },
-            { label: 'HTML Document (.html)...', click: () => sendMenuCommand('export:html') },
-            { label: 'Plain Text (.txt)...', click: () => sendMenuCommand('export:txt') },
-            { label: 'EPUB eBook (.epub)...', click: () => sendMenuCommand('export:epub') },
-            { type: 'separator' },
-            { label: 'Excel Workbook (.xlsx)...', click: () => sendMenuCommand('export:xlsx') },
-            { label: 'CSV Table(s) (.csv)...', click: () => sendMenuCommand('export:csv') },
-          ],
+          label: 'Export to File',
+          submenu: exportSubmenu(false),
+        },
+        {
+          label: 'Copy as File',
+          enabled: process.platform === 'win32',
+          submenu: exportSubmenu(true),
         },
         { type: 'separator' },
         {
@@ -368,6 +376,7 @@ ipcMain.handle(IPC_CHANNELS.readMarkdownFile, async (_event, filePath: string) =
 ipcMain.handle(
   IPC_CHANNELS.openLinkedMarkdown,
   async (_event, sourceFilePath: string, href: string): Promise<LinkedMarkdownDocument | null> => {
+    href = href.trim();
     if (/^(https?:|mailto:)/i.test(href)) {
       await shell.openExternal(href);
       return null;
@@ -381,12 +390,18 @@ ipcMain.handle(
       };
     }
 
-    const linkedFilePath = getLocalLinkedMarkdownPath(sourceFilePath, href);
-    if (!linkedFilePath) {
+    const target = getLocalLinkedTarget(sourceFilePath, href);
+    if (!target) {
       throw new Error(`Unsupported link: ${href}`);
     }
 
-    const document = await readMarkdownFile(linkedFilePath);
+    const linkedFilePath = target.filePath;
+    if (target.line !== null || !isMarkdownFile(linkedFilePath)) {
+      await openLinkedFile(linkedFilePath, target.line, target.column);
+      return null;
+    }
+
+    const document = await readTrackedMarkdownFile(linkedFilePath);
     return {
       ...document,
       hash: getLinkHash(href),
@@ -492,7 +507,8 @@ ipcMain.on(IPC_CHANNELS.documentStateChanged, (_event, state: DocumentState) => 
   }
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await cleanupClipboardExports();
   buildMenu();
   createWindow(getLaunchFilePath());
 });

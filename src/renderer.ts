@@ -42,6 +42,8 @@ import { appTemplate } from './renderer/app-template';
 import { getAppElements } from './renderer/dom';
 import { parseFrontMatter, renderFrontMatter } from './renderer/front-matter';
 import { getTextDirection } from './renderer/text-direction';
+import { isExplicitLocalFileLink } from './shared/local-links';
+import { optimizeLargePreview, removePreviewOptimization } from './renderer/large-preview';
 import type {
   AppSettings,
   ExplorerDirectory,
@@ -114,6 +116,17 @@ const markdownParser = new MarkdownIt({
     },
   });
 
+const defaultValidateLink = markdownParser.validateLink.bind(markdownParser);
+markdownParser.validateLink = (href) =>
+  isExplicitLocalFileLink(href) || defaultValidateLink(href);
+
+DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
+  if (node.nodeName.toLowerCase() === 'a' && data.attrName === 'href' &&
+      isExplicitLocalFileLink(data.attrValue)) {
+    data.forceKeepAttr = true;
+  }
+});
+
 const defaultFenceRenderer = markdownParser.renderer.rules.fence;
 markdownParser.renderer.rules.fence = (tokens, index, options, env, self) => {
   const token = tokens[index];
@@ -159,6 +172,9 @@ const blockDirectionSelector = [
 let previewRenderSerial = 0;
 let mermaidPromise: Promise<typeof import('mermaid').default> | null = null;
 let previewRenderPromise: Promise<void> = Promise.resolve();
+let diagramObserver: IntersectionObserver | null = null;
+let diagramId = 0;
+let previewUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -301,7 +317,7 @@ const editor = new EditorView({
         }
 
         currentContent = update.state.doc.toString();
-        renderPreview();
+        schedulePreview();
         syncDocumentState();
       }),
     ],
@@ -599,8 +615,8 @@ const addMermaidViewerButton = (diagram: HTMLElement) => {
   createIcons({ icons: lucideIcons });
 };
 
-const renderMermaidDiagrams = async (renderSerial: number) => {
-  const diagrams = Array.from(
+const renderMermaidDiagrams = async (renderSerial: number, targets?: HTMLElement[]) => {
+  const diagrams = targets ?? Array.from(
     preview.querySelectorAll<HTMLElement>('.mermaid-diagram[data-mermaid-source]'),
   );
 
@@ -614,7 +630,7 @@ const renderMermaidDiagrams = async (renderSerial: number) => {
     return;
   }
 
-  for (const [index, diagram] of diagrams.entries()) {
+  for (const diagram of diagrams) {
     if (renderSerial !== previewRenderSerial) {
       return;
     }
@@ -630,7 +646,7 @@ const renderMermaidDiagrams = async (renderSerial: number) => {
 
     try {
       const { svg, bindFunctions } = await mermaid.render(
-        `mermaid-${renderSerial}-${index}`,
+        `mermaid-${renderSerial}-${++diagramId}`,
         source,
       );
 
@@ -651,7 +667,56 @@ const renderMermaidDiagrams = async (renderSerial: number) => {
       diagram.classList.remove('is-loading');
       showMermaidError(diagram, source, error);
     }
+
+    // Give input and scrolling a turn between expensive diagrams.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }
+};
+
+const queueMermaidDiagrams = (renderSerial: number, diagrams: HTMLElement[]) => {
+  previewRenderPromise = previewRenderPromise
+    .then(() => {
+      if (renderSerial === previewRenderSerial) {
+        return renderMermaidDiagrams(renderSerial, diagrams);
+      }
+    })
+    .catch(showOpenError);
+};
+
+const startMermaidRendering = (renderSerial: number, large: boolean) => {
+  if (!large) {
+    queueMermaidDiagrams(renderSerial, Array.from(preview.querySelectorAll<HTMLElement>(
+      '.mermaid-diagram[data-mermaid-source]',
+    )));
+    return;
+  }
+  diagramObserver = new IntersectionObserver((entries) => {
+    const visible = entries.filter((entry) => entry.isIntersecting);
+    visible.forEach((entry) => diagramObserver?.unobserve(entry.target));
+    if (visible.length) {
+      queueMermaidDiagrams(renderSerial, visible.flatMap((entry) => Array.from(
+        entry.target.querySelectorAll<HTMLElement>('.mermaid-diagram[data-mermaid-source]'),
+      )));
+    }
+  }, { root: preview.closest('.preview-scroll'), rootMargin: '1000px 0px' });
+  preview.querySelectorAll<HTMLElement>('.mermaid-diagram[data-mermaid-source]').forEach((diagram) => {
+    diagram.textContent = 'Rendering diagram...';
+    // Observe the section: descendants of skipped content have no layout yet.
+    const section = diagram.closest('.preview-deferred-block');
+    if (section) diagramObserver?.observe(section);
+  });
+};
+
+const schedulePreview = () => {
+  if (previewUpdateTimer !== null) clearTimeout(previewUpdateTimer);
+  if (currentContent.length < 100_000 && !preview.classList.contains('large-preview')) {
+    renderPreview();
+    return;
+  }
+  // Invalidate pending diagram work as soon as the document changes.
+  ++previewRenderSerial;
+  diagramObserver?.disconnect();
+  previewUpdateTimer = setTimeout(renderPreview, 200);
 };
 
 const applySettings = (settings: AppSettings) => {
@@ -741,6 +806,10 @@ const renderTableOfContents = () => {
 };
 
 const renderPreview = () => {
+  if (previewUpdateTimer !== null) clearTimeout(previewUpdateTimer);
+  previewUpdateTimer = null;
+  diagramObserver?.disconnect();
+  diagramObserver = null;
   const renderSerial = ++previewRenderSerial;
   const { body, attributes } = parseFrontMatter(currentContent);
   const rawHtml = `${renderFrontMatter(attributes)}${markdownParser.render(body)}`;
@@ -750,7 +819,8 @@ const renderPreview = () => {
 
   applyPreviewDirection();
   renderTableOfContents();
-  previewRenderPromise = renderMermaidDiagrams(renderSerial).catch(showOpenError);
+  const large = optimizeLargePreview(preview, currentContent.length);
+  startMermaidRendering(renderSerial, large);
 
   preview.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((link) => {
     const href = link.getAttribute('href');
@@ -904,17 +974,13 @@ const openLinkedDocument = (document: LinkedMarkdownDocument) => {
 };
 
 const openMarkdownLink = async (href: string) => {
+  href = href.trim();
   if (href.startsWith('#')) {
     scrollToHash(decodeURIComponent(href.slice(1)));
     return;
   }
 
-  if (!currentFilePath) {
-    window.location.href = href;
-    return;
-  }
-
-  const document = await window.mdReader.openLinkedMarkdown(currentFilePath, href);
+  const document = await window.mdReader.openLinkedMarkdown(currentFilePath ?? '', href);
   if (document) {
     openLinkedDocument(document);
   }
@@ -1033,13 +1099,12 @@ const rasterizeMermaidDiagrams = async (container: HTMLElement) => {
 const getTableName = (table: HTMLTableElement, index: number) => {
   const caption = table.querySelector('caption')?.textContent?.trim();
   if (caption) return caption;
-  let previous = table.previousElementSibling;
-  while (previous) {
-    if (/^H[1-6]$/.test(previous.tagName)) {
+  const headings = Array.from(preview.querySelectorAll('h1, h2, h3, h4, h5, h6'));
+  for (const previous of headings.reverse()) {
+    if (previous.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING) {
       const heading = previous.textContent?.replace(/#\s*$/, '').trim();
       if (heading) return heading;
     }
-    previous = previous.previousElementSibling;
   }
   return `Table ${index + 1}`;
 };
@@ -1068,9 +1133,30 @@ const tableToRows = (table: HTMLTableElement) => {
   return grid.map((row) => Array.from({ length: width }, (_, index) => row[index] ?? ''));
 };
 
+const getExportTables = () => {
+  const large = preview.classList.contains('large-preview');
+  // innerText is empty inside skipped content. Materialize it only while
+  // reading export data, then restore containment before the next paint.
+  preview.classList.remove('large-preview');
+  try {
+    return Array.from(preview.querySelectorAll<HTMLTableElement>('table')).map(
+      (table, index) => ({ name: getTableName(table, index), rows: tableToRows(table) }),
+    );
+  } finally {
+    preview.classList.toggle('large-preview', large);
+  }
+};
+
 const createExportSnapshot = async (format: ExportFormat) => {
+  if (previewUpdateTimer !== null) renderPreview();
+  diagramObserver?.disconnect();
+  // Export needs every diagram, including those never scrolled into view.
+  queueMermaidDiagrams(previewRenderSerial, Array.from(preview.querySelectorAll<HTMLElement>(
+    '.mermaid-diagram[data-mermaid-source]',
+  )));
   await previewRenderPromise;
   const clone = preview.cloneNode(true) as HTMLElement;
+  removePreviewOptimization(clone);
   clone.removeAttribute('id');
   clone.querySelectorAll('.mermaid-open-button, .header-anchor').forEach((element) => element.remove());
   clone.querySelectorAll('mark.preview-search-match').forEach((mark) => {
@@ -1082,9 +1168,7 @@ const createExportSnapshot = async (format: ExportFormat) => {
 
   const plainClone = clone.cloneNode(true) as HTMLElement;
   plainClone.querySelectorAll('style, script').forEach((element) => element.remove());
-  const tables = Array.from(preview.querySelectorAll<HTMLTableElement>('table')).map(
-    (table, index) => ({ name: getTableName(table, index), rows: tableToRows(table) }),
-  );
+  const tables = getExportTables();
 
   return {
     format,
@@ -1097,9 +1181,9 @@ const createExportSnapshot = async (format: ExportFormat) => {
   };
 };
 
-const exportCurrentDocument = async (format: ExportFormat) => {
+const exportCurrentDocument = async (format: ExportFormat, destination: 'file' | 'clipboard' = 'file') => {
   try {
-    await window.mdReader.exportDocument(await createExportSnapshot(format));
+    await window.mdReader.exportDocument({ ...await createExportSnapshot(format), destination });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await window.mdReader.showErrorMessage('Could not export document', message);
@@ -1812,6 +1896,9 @@ window.mdReader.onMenuCommand((command: MenuCommand) => {
 
   if (command.startsWith('export:')) {
     void exportCurrentDocument(command.slice('export:'.length) as ExportFormat);
+  }
+  if (command.startsWith('copy-file:')) {
+    void exportCurrentDocument(command.slice('copy-file:'.length) as ExportFormat, 'clipboard');
   }
 });
 

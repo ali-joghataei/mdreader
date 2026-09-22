@@ -1,7 +1,7 @@
 {
   "name": "mdreader",
   "productName": "MdReader",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Cross-platform Markdown reader and editor built with Electron.",
   "main": "dist-electron/main.js",
   "private": true,
@@ -35,6 +35,7 @@
   "build": {
     "appId": "com.alijoghataei.mdreader",
     "productName": "MdReader",
+    "artifactName": "${productName}.Setup.${version}.${ext}",
     "asar": true,
     "publish": [
       {

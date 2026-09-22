@@ -161,6 +161,18 @@
   text-align: right;
 }
 
+.large-preview > .preview-deferred-block {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto var(--preview-estimated-height, 100px);
+}
+
+@media print {
+  .large-preview > .preview-deferred-block {
+    content-visibility: visible;
+    contain-intrinsic-block-size: none;
+  }
+}
+
 .markdown-body .ltr-block {
   text-align: left;
 }

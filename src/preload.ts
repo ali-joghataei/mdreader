@@ -5,6 +5,7 @@ import {
   type DocumentState,
   type ExplorerDirectory,
   type ExportFormat,
+  type ExportDestination,
   type ExternalFileChangedEvent,
   type LinkedMarkdownDocument,
   type MarkdownDocument,
@@ -18,6 +19,7 @@ type ExportTable = {
 
 type ExportDocument = {
   format: ExportFormat;
+  destination?: ExportDestination;
   title: string;
   sourceFilePath: string | null;
   html: string;

@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
+import type { ExportDestination } from './shared/contracts';
+import { copyFilesToClipboard, createClipboardExportDirectory, removeClipboardExport, scheduleClipboardExportCleanup } from './main/clipboard-files';
 
 // html-to-docx does not publish TypeScript declarations.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -23,6 +25,7 @@ export type ExportTable = {
 
 export type ExportDocument = {
   format: ExportFormat;
+  destination?: ExportDestination;
   title: string;
   sourceFilePath: string | null;
   html: string;
@@ -285,11 +288,41 @@ export const exportDocument = async (
   if ((document.format === 'xlsx' || document.format === 'csv') && document.tables.length === 0) {
     throw new Error('This document does not contain any tables to export.');
   }
+  if (document.destination === 'clipboard') {
+    const directory = await createClipboardExportDirectory();
+    try {
+      const base = safeBaseName(path.basename(suggestedBasePath(document)));
+      const filePaths: string[] = [];
+      if (document.format === 'csv') {
+        for (const [index, table] of document.tables.entries()) {
+          const name = document.tables.length === 1 ? base : `${base}-${index + 1}-${safeBaseName(table.name || `table-${index + 1}`)}`;
+          const filePath = path.join(directory, `${name}.csv`);
+          await fs.writeFile(filePath, toCsv(table.rows), 'utf8');
+          filePaths.push(filePath);
+        }
+      } else {
+        const filePath = path.join(directory, `${base}.${extensionByFormat[document.format]}`);
+        await writeExportFile(document, filePath);
+        filePaths.push(filePath);
+      }
+      await copyFilesToClipboard(filePaths);
+      scheduleClipboardExportCleanup(directory);
+      return { canceled: false, filePaths };
+    } catch (error) {
+      await removeClipboardExport(directory).catch(() => undefined);
+      throw error;
+    }
+  }
   if (document.format === 'csv') return exportCsv(window, document);
 
   const filePath = await chooseFilePath(window, document, document.format);
   if (!filePath) return { canceled: true, filePaths: [] };
 
+  await writeExportFile(document, filePath);
+  return { canceled: false, filePaths: [filePath] };
+};
+
+const writeExportFile = async (document: ExportDocument, filePath: string) => {
   const embeddedBody = await embedLocalImages(document.html, document.sourceFilePath);
   const fullHtml = createHtmlDocument(document, embeddedBody);
 
@@ -309,5 +342,4 @@ export const exportDocument = async (
     case 'epub': await fs.writeFile(filePath, await createEpub(document, embeddedBody)); break;
     case 'xlsx': await fs.writeFile(filePath, await createWorkbook(document.tables)); break;
   }
-  return { canceled: false, filePaths: [filePath] };
 };
